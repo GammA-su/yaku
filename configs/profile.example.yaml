@@ -1,0 +1,100 @@
+# Example Yaku per-game profile.
+#
+# Copy this to profiles/<your-game>.yaml (or run `uv run yaku --setup`) and edit.
+# A profile is a full config; running with `--profile <name>` loads it and
+# saves window/OCR/overlay/replacement changes back into it automatically.
+#
+#   uv run yaku --profile my-vn --pick-window
+#   uv run yaku --profile my-vn --select-ocr-region
+#   uv run yaku --profile my-vn --mode v1-overlay --run
+
+app:
+  mode: v1-overlay          # v1-overlay | v2-mirror
+  target_lang: en
+  tick_ms: 300
+  debug: false
+
+window:
+  title_contains: "My Visual Novel"   # set by --pick-window
+  hwnd: null                          # set by --pick-window (Windows)
+  capture_backend: mss                # mss | auto | dxcam | win32
+
+ocr:
+  backend: paddleocr        # paddleocr | manga_ocr | dummy
+  region:                   # pixel region, set by --select-ocr-region
+    x: 1080
+    y: 977
+    w: 558
+    h: 233
+  hash_threshold: 0
+  min_chars: 1
+
+translator:
+  backend: llama_cpp        # llama_cpp | deepl
+  context_lines: 3
+  llama_cpp:
+    base_url: "http://127.0.0.1:8080/v1"
+    model: "qwen-local"
+    temperature: 0.2
+    max_tokens: 256
+  deepl:
+    api_key_env: "DEEPL_API_KEY"   # the env var name; the key is never stored here
+    target_lang: "EN-US"
+    formality: "default"
+    use_context: true
+
+v1_overlay:
+  x: 100
+  y: 700
+  w: 900
+  h: 120
+  locked: false
+  click_through: true
+  opacity: 0.85
+  font_family: "Arial"
+  font_size: 28
+  background_opacity: 0.55
+  text_outline: true
+  save_geometry_on_exit: true
+  show_source_in_debug: true
+  show_status_badge: true
+  pending_behavior: keep_previous
+  duplicate_suppression_window: 3
+
+v2_mirror:
+  fullscreen: false
+  preserve_aspect_ratio: true
+  forward_input: true
+  input_focus_mode: send_input_only   # send_input_only | focus_then_send | disabled
+  replacement_region:                 # normalized 0..1, set by --select-replacement-region
+    x_ratio: 0.08
+    y_ratio: 0.72
+    w_ratio: 0.84
+    h_ratio: 0.20
+  render_mode: mask-text              # mask-text | inpaint-text | ai-text-edit
+  inpaint:
+    backend: opencv
+    mask_padding: 6
+    method: telea
+    radius: 3
+    fallback_to_mask_text: true
+    debug_draw_mask: false
+  ai_text_edit:
+    enabled: false                    # EXPERIMENTAL — off by default
+    backend: external_http
+    endpoint: "http://127.0.0.1:7860"
+    timeout_sec: 30
+    fallback: inpaint-text
+    deterministic_text_after_ai: true
+
+cache:
+  sqlite_path: "out/yaku_cache.sqlite3"
+  cache_translations: true
+  cache_edited_frames: true
+
+glossary:
+  enabled: true
+  entries:
+    - source: "先輩"
+      target: "senpai"
+      note: "Keep as honorific unless unnatural."

@@ -1,0 +1,86 @@
+app:
+  debug: true
+  mode: v1-overlay
+  target_lang: en
+  tick_ms: 300
+cache:
+  cache_edited_frames: true
+  cache_translations: true
+  sqlite_path: out/yaku_cache.sqlite3
+glossary:
+  enabled: true
+  entries:
+  - note: Keep as honorific unless unnatural.
+    source: 先輩
+    target: senpai
+  - note: Use affectionate tone.
+    source: お兄ちゃん
+    target: big brother
+ocr:
+  backend: paddleocr
+  hash_threshold: 0
+  min_chars: 1
+  region:
+    h: 152
+    w: 724
+    x: 644
+    y: 864
+translator:
+  backend: llama_cpp
+  context_lines: 3
+  deepl:
+    api_key_env: DEEPL_API_KEY
+    formality: default
+    target_lang: EN-US
+    use_context: true
+  llama_cpp:
+    base_url: http://127.0.0.1:8080/v1
+    max_tokens: 256
+    model: qwen-local
+    temperature: 0.2
+v1_overlay:
+  background_opacity: 0.55
+  click_through: true
+  duplicate_suppression_window: 3
+  font_family: Arial
+  font_size: 28
+  h: 120
+  locked: false
+  opacity: 0.85
+  pending_behavior: keep_previous
+  save_geometry_on_exit: true
+  show_source_in_debug: true
+  show_status_badge: true
+  text_outline: true
+  w: 900
+  x: 100
+  y: 700
+v2_mirror:
+  ai_text_edit:
+    backend: external_http
+    deterministic_text_after_ai: true
+    enabled: false
+    endpoint: http://127.0.0.1:7860
+    fallback: inpaint-text
+    timeout_sec: 30
+  forward_input: true
+  fullscreen: false
+  inpaint:
+    backend: opencv
+    debug_draw_mask: false
+    fallback_to_mask_text: true
+    mask_padding: 6
+    method: telea
+    radius: 3
+  input_focus_mode: send_input_only
+  preserve_aspect_ratio: true
+  render_mode: mask-text
+  replacement_region:
+    h_ratio: 0.5236111111111111
+    w_ratio: 0.4984375
+    x_ratio: 0.155859375
+    y_ratio: 0.19583333333333333
+window:
+  capture_backend: mss
+  hwnd: 724194
+  title_contains: IsekaiBrideHunting
