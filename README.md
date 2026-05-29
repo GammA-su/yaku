@@ -10,6 +10,11 @@ Windows APIs (input forwarding, dxcam/pywin32 capture) degrade gracefully
 elsewhere.
 
 ---
+<p>
+  <img width="501" height="414" alt="image" src="https://github.com/user-attachments/assets/ac9b428a-0974-4155-b2f4-bf491c375970" />
+  <img width="652" height="414" alt="image" src="https://github.com/user-attachments/assets/f3ba360c-f1c1-4162-a249-543d1a863348" />
+</p>
+
 
 ## V1 vs V2
 
