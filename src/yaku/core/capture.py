@@ -28,6 +28,10 @@ class BaseCapture(ABC):
     def close(self) -> None:
         """Release any held resources."""
 
+    def source_origin(self) -> tuple[int, int]:
+        """Top-left screen coordinate for ``capture_frame`` output."""
+        return (0, 0)
+
 
 # ---------------------------------------------------------------------------
 # mss backend
@@ -39,7 +43,7 @@ class MSSCapture(BaseCapture):
     Requires ``uv add mss``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: WindowConfig | None = None) -> None:
         try:
             import mss as _mss  # lazy import
         except ImportError as exc:
@@ -47,10 +51,28 @@ class MSSCapture(BaseCapture):
                 "mss is not installed. Install with: uv add mss"
             ) from exc
         self._mss = _mss
+        self._config = config
+        self._last_origin = (0, 0)
+
+    def _target_monitor(self, sct) -> dict:
+        rect = _window_rect(self._config)
+        if rect is None:
+            monitor = sct.monitors[1]  # primary monitor
+            self._last_origin = (monitor["left"], monitor["top"])
+            return monitor
+
+        left, top, right, bottom = rect
+        self._last_origin = (left, top)
+        return {
+            "left": left,
+            "top": top,
+            "width": max(1, right - left),
+            "height": max(1, bottom - top),
+        }
 
     def capture_frame(self) -> Image.Image:
         with self._mss.mss() as sct:
-            monitor = sct.monitors[1]  # primary monitor
+            monitor = self._target_monitor(sct)
             shot = sct.grab(monitor)
             return Image.frombytes("RGB", shot.size, shot.rgb)
 
@@ -64,6 +86,9 @@ class MSSCapture(BaseCapture):
             }
             shot = sct.grab(region)
             return Image.frombytes("RGB", shot.size, shot.rgb)
+
+    def source_origin(self) -> tuple[int, int]:
+        return self._last_origin
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +128,38 @@ class DXCamCapture(BaseCapture):
         del self._camera
 
 
+def _window_rect(config: WindowConfig | None) -> tuple[int, int, int, int] | None:
+    """Resolve the configured target window rect, if available."""
+    if config is None:
+        return None
+    try:
+        from yaku.ui.window_picker import get_window_info, list_visible_windows
+
+        info = get_window_info(config.hwnd) if config.hwnd is not None else None
+        if info is None and config.title_contains:
+            needle = config.title_contains.lower()
+            for candidate in list_visible_windows():
+                if needle in candidate.title.lower():
+                    info = candidate
+                    break
+        if info is None:
+            return None
+
+        left, top, right, bottom = info.rect
+        if right <= left or bottom <= top:
+            return None
+        return info.rect
+    except Exception:
+        return None
+
+
+def _create_mss_capture(config: WindowConfig) -> BaseCapture:
+    try:
+        return MSSCapture(config)
+    except TypeError:
+        return MSSCapture()
+
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
@@ -121,7 +178,7 @@ def create_capture(config: WindowConfig) -> BaseCapture:
         return DXCamCapture()
 
     if backend == "mss":
-        return MSSCapture()
+        return _create_mss_capture(config)
 
     if backend == "win32":
         raise InvalidBackendError(
@@ -129,9 +186,9 @@ def create_capture(config: WindowConfig) -> BaseCapture:
         )
 
     if backend == "auto":
-        for cls in (MSSCapture, DXCamCapture):
+        for create in (lambda: _create_mss_capture(config), DXCamCapture):
             try:
-                return cls()
+                return create()
             except OptionalDependencyMissing:
                 continue
         raise OptionalDependencyMissing(

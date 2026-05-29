@@ -217,70 +217,74 @@ def _create_setup_wizard(profile: str | None = None, config_path: str | None = N
             self.setStyleSheet(
                 """
                 QWizard {
-                    background: #f8fafc;
-                    color: #111827;
+                    background: #0b0f19;
+                    color: #f8fafc;
                 }
                 QWizardPage {
-                    background: #f8fafc;
-                    color: #111827;
+                    background: #0b0f19;
+                    color: #f8fafc;
                 }
                 QLabel {
-                    color: #111827;
+                    color: #f8fafc;
                     font-size: 13px;
                 }
                 QWizardPage QLabel#qt_wizard_title_label {
-                    color: #0f172a;
+                    color: #ffffff;
                     font-size: 20px;
-                    font-weight: 600;
+                    font-weight: bold;
                 }
                 QLineEdit,
                 QComboBox {
                     min-height: 32px;
                     padding: 4px 10px;
-                    border: 1px solid #94a3b8;
-                    border-radius: 4px;
-                    background: #ffffff;
-                    color: #111827;
-                    selection-background-color: #2563eb;
+                    border: 1px solid #334155;
+                    border-radius: 6px;
+                    background: #0f172a;
+                    color: #f8fafc;
+                    selection-background-color: #4f46e5;
                     selection-color: #ffffff;
                 }
                 QLineEdit:focus,
                 QComboBox:focus {
-                    border-color: #2563eb;
+                    border-color: #6366f1;
                 }
                 QComboBox::drop-down {
-                    width: 28px;
-                    border-left: 1px solid #cbd5e1;
-                    background: #f1f5f9;
+                    width: 24px;
+                    border-left: 1px solid #334155;
+                    background: #1e293b;
                 }
                 QComboBox QAbstractItemView {
-                    background: #ffffff;
-                    color: #111827;
-                    selection-background-color: #2563eb;
+                    background: #0f172a;
+                    color: #f8fafc;
+                    selection-background-color: #4f46e5;
                     selection-color: #ffffff;
-                    border: 1px solid #94a3b8;
+                    border: 1px solid #334155;
                 }
                 QPushButton {
                     min-width: 84px;
                     min-height: 28px;
-                    padding: 4px 14px;
-                    border: 1px solid #94a3b8;
-                    border-radius: 4px;
-                    background: #ffffff;
-                    color: #111827;
+                    padding: 6px 14px;
+                    border: 1px solid #334155;
+                    border-radius: 6px;
+                    background: #334155;
+                    color: #f8fafc;
                 }
                 QPushButton:hover {
-                    background: #f1f5f9;
-                    border-color: #64748b;
+                    background: #475569;
+                    border-color: #475569;
                 }
                 QPushButton:default {
-                    background: #2563eb;
-                    border-color: #1d4ed8;
+                    background: #4f46e5;
+                    border-color: #4f46e5;
                     color: #ffffff;
                 }
+                QPushButton:default:hover {
+                    background: #6366f1;
+                    border-color: #6366f1;
+                }
                 QPushButton:disabled {
-                    background: #e5e7eb;
-                    border-color: #cbd5e1;
+                    background: #0f172a;
+                    border-color: #1e293b;
                     color: #64748b;
                 }
                 """

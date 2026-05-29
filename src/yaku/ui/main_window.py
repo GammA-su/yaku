@@ -5,9 +5,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFormLayout,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -21,7 +25,7 @@ from PyQt6.QtWidgets import (
 
 
 class MainWindow(QMainWindow):
-    """Small GUI-first launcher for common Yaku actions."""
+    """Launcher dashboard for Yaku."""
 
     def __init__(self, profile: str | None = None, config_path: str | None = None) -> None:
         super().__init__()
@@ -29,51 +33,203 @@ class MainWindow(QMainWindow):
         self.config_path = config_path
         self._run_process: subprocess.Popen | None = None
 
-        self.setWindowTitle("Yaku")
-        self.resize(560, 420)
+        self.setWindowTitle("Yaku Launcher")
+        self.resize(680, 480)
 
+        # Main Root Widget
         root = QWidget(self)
         self.setCentralWidget(root)
 
-        layout = QVBoxLayout(root)
+        main_layout = QVBoxLayout(root)
+        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(24, 24, 24, 24)
 
-        self.profile_label = QLabel(f"Profile: {profile or 'default'}")
-        layout.addWidget(self.profile_label)
+        # 1. Header Row
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        title_vbox = QVBoxLayout()
+        title_vbox.setSpacing(2)
+        self.title_label = QLabel("YAKU")
+        self.title_label.setObjectName("header_title")
+        self.subtitle_label = QLabel("AI Visual Novel Translator")
+        self.subtitle_label.setObjectName("header_subtitle")
+        title_vbox.addWidget(self.title_label)
+        title_vbox.addWidget(self.subtitle_label)
+        header_layout.addLayout(title_vbox)
+        
+        header_layout.addStretch()
+        
+        self.profile_badge = QLabel(f"Profile: {profile or 'default'}")
+        self.profile_badge.setStyleSheet(
+            "color: #6366f1; background-color: #1e1b4b; "
+            "border: 1px solid #312e81; border-radius: 12px; "
+            "padding: 4px 12px; font-weight: bold; font-size: 11px;"
+        )
+        self.profile_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(self.profile_badge)
+        main_layout.addWidget(header_widget)
 
-        form = QFormLayout()
+        # 2. Columns Row (Dashboard controls + Settings)
+        cols_layout = QHBoxLayout()
+        cols_layout.setSpacing(16)
+
+        # Left Column: Controller / Status
+        control_group = QGroupBox("Status & Control")
+        control_vbox = QVBoxLayout(control_group)
+        control_vbox.setSpacing(12)
+        control_vbox.setContentsMargins(16, 20, 16, 16)
+
+        status_hbox = QHBoxLayout()
+        status_hbox.addWidget(QLabel("Engine Status:"))
+        self.status_badge = QLabel("STOPPED")
+        self.status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_hbox.addWidget(self.status_badge)
+        control_vbox.addLayout(status_hbox)
+
+        control_vbox.addStretch()
+
+        self.btn_start = QPushButton("Start Translation")
+        self.btn_start.setObjectName("btn_primary")
+        self.btn_start.clicked.connect(self._start)
+        self.btn_start.setMinimumHeight(36)
+        control_vbox.addWidget(self.btn_start)
+
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setObjectName("btn_danger")
+        self.btn_stop.clicked.connect(self._stop)
+        self.btn_stop.setMinimumHeight(36)
+        control_vbox.addWidget(self.btn_stop)
+
+        cols_layout.addWidget(control_group, 4)
+
+        # Right Column: Quick Config
+        config_group = QGroupBox("Quick Configuration")
+        form = QFormLayout(config_group)
+        form.setSpacing(12)
+        form.setContentsMargins(16, 20, 16, 16)
+
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["v1-overlay", "v2-mirror"])
-        form.addRow("Mode", self.mode_combo)
+        form.addRow("Operation Mode", self.mode_combo)
 
         self.translator_combo = QComboBox()
         self.translator_combo.addItems(["llama-cpp", "deepl"])
-        form.addRow("Translator", self.translator_combo)
+        form.addRow("Translation Backend", self.translator_combo)
 
         self.target_lang_input = QLineEdit("en")
-        form.addRow("Target language", self.target_lang_input)
-        layout.addLayout(form)
+        form.addRow("Target Language", self.target_lang_input)
 
-        button_rows = [
-            [
-                ("Setup Wizard", self._open_setup_wizard),
-                ("Pick Window", self._pick_window),
-                ("Draw OCR Rectangle", self._select_ocr_region),
-            ],
-            [
-                ("Draw Replacement Rectangle", self._select_replacement_region),
-                ("Start", self._start),
-                ("Stop", self._stop),
-                ("Health Check", self._health_check),
-                ("Logs", self._show_logs),
-            ],
-        ]
-        for row in button_rows:
-            row_layout = QHBoxLayout()
-            for label, handler in row:
-                button = QPushButton(label)
-                button.clicked.connect(handler)
-                row_layout.addWidget(button)
-            layout.addLayout(row_layout)
+        cols_layout.addWidget(config_group, 6)
+        main_layout.addLayout(cols_layout)
+
+        # 3. Utilities Grid Row
+        utils_group = QGroupBox("Utilities & Calibration")
+        utils_grid = QGridLayout(utils_group)
+        utils_grid.setSpacing(12)
+        utils_grid.setContentsMargins(16, 20, 16, 16)
+
+        self.btn_wizard = QPushButton("Setup Wizard")
+        self.btn_wizard.clicked.connect(self._open_setup_wizard)
+        utils_grid.addWidget(self.btn_wizard, 0, 0)
+
+        self.btn_picker = QPushButton("Pick VN Window")
+        self.btn_picker.clicked.connect(self._pick_window)
+        utils_grid.addWidget(self.btn_picker, 0, 1)
+
+        self.btn_ocr = QPushButton("Draw OCR Area")
+        self.btn_ocr.clicked.connect(self._select_ocr_region)
+        utils_grid.addWidget(self.btn_ocr, 0, 2)
+
+        self.btn_replacement = QPushButton("Draw Replacement Area")
+        self.btn_replacement.clicked.connect(self._select_replacement_region)
+        utils_grid.addWidget(self.btn_replacement, 1, 0)
+
+        self.btn_health = QPushButton("Diagnostics")
+        self.btn_health.clicked.connect(self._health_check)
+        utils_grid.addWidget(self.btn_health, 1, 1)
+
+        self.btn_logs = QPushButton("System Logs")
+        self.btn_logs.clicked.connect(self._show_logs)
+        utils_grid.addWidget(self.btn_logs, 1, 2)
+
+        main_layout.addWidget(utils_group)
+
+        # QTimer for monitoring the background process
+        self.process_timer = QTimer(self)
+        self.process_timer.setInterval(500)
+        self.process_timer.timeout.connect(self._monitor_process)
+
+        # Load configuration values into inputs
+        self._load_config_into_ui()
+        self._update_ui_state()
+
+    def _load_config_into_ui(self) -> None:
+        from yaku.core.config import load_config, YakuConfig
+        from yaku.core.profiles import resolve_profile
+        
+        try:
+            if self.profile:
+                config, _ = resolve_profile(self.profile)
+            elif self.config_path:
+                path = Path(self.config_path)
+                config = load_config(path) if path.exists() else YakuConfig()
+            else:
+                config, _ = resolve_profile("default")
+                
+            # Set mode combobox
+            mode = config.app.mode or "v1-overlay"
+            index = self.mode_combo.findText(mode)
+            if index >= 0:
+                self.mode_combo.setCurrentIndex(index)
+                
+            # Set translator combobox
+            translator = config.translator.backend or "llama_cpp"
+            combo_translator = "llama-cpp" if translator == "llama_cpp" else "deepl"
+            index = self.translator_combo.findText(combo_translator)
+            if index >= 0:
+                self.translator_combo.setCurrentIndex(index)
+                
+            # Set target language
+            self.target_lang_input.setText(config.app.target_lang or "en")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[yaku] Failed to load config into UI: {exc}")
+
+    def _update_ui_state(self) -> None:
+        is_running = self._run_process is not None and self._run_process.poll() is None
+        
+        if is_running:
+            self.status_badge.setText("RUNNING")
+            self.status_badge.setStyleSheet(
+                "color: #10b981; background-color: #064e3b; "
+                "border: 1px solid #10b98144; border-radius: 4px; "
+                "font-weight: bold; padding: 4px 10px; font-size: 11px;"
+            )
+            self.btn_start.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.mode_combo.setEnabled(False)
+            self.translator_combo.setEnabled(False)
+            self.target_lang_input.setEnabled(False)
+        else:
+            self.status_badge.setText("STOPPED")
+            self.status_badge.setStyleSheet(
+                "color: #94a3b8; background-color: #1e293b; "
+                "border: 1px solid #334155; border-radius: 4px; "
+                "font-weight: bold; padding: 4px 10px; font-size: 11px;"
+            )
+            self.btn_start.setEnabled(True)
+            self.btn_stop.setEnabled(False)
+            self.mode_combo.setEnabled(True)
+            self.translator_combo.setEnabled(True)
+            self.target_lang_input.setEnabled(True)
+
+    def _monitor_process(self) -> None:
+        if self._run_process is not None:
+            if self._run_process.poll() is not None:
+                self._run_process = None
+                self.process_timer.stop()
+                self._update_ui_state()
 
     def _base_command(self) -> list[str]:
         cmd = [sys.executable, "-m", "yaku.main"]
@@ -91,21 +247,75 @@ class MainWindow(QMainWindow):
             return None
 
     def _open_setup_wizard(self) -> None:
-        self._run_command(["--setup"])
+        from yaku.ui.setup_wizard import SetupWizard
+        wizard = SetupWizard(profile=self.profile, config_path=self.config_path)
+        if wizard.exec():
+            self._load_config_into_ui()
 
     def _pick_window(self) -> None:
-        self._run_command(["--pick-window"])
+        from yaku.core.config import save_config, update_window_selection
+        from yaku.core.profiles import resolve_profile
+        from yaku.ui.window_picker import pick_window_gui
+        
+        config, config_path = resolve_profile(self.profile or "default")
+        win = pick_window_gui(self)
+        if win is not None:
+            update_window_selection(config, win.hwnd, win.title)
+            save_config(config, config_path)
+            QMessageBox.information(
+                self, "Window Selected", f"Target window saved:\n{win.title}\n(HWND: {win.hwnd})"
+            )
 
     def _select_ocr_region(self) -> None:
-        self._run_command(["--select-ocr-region"])
+        from yaku.core.profiles import resolve_profile
+        config, config_path = resolve_profile(self.profile or "default")
+        
+        self.hide()
+        QTimer.singleShot(200, lambda: self._do_select_ocr_region(config, config_path))
+
+    def _do_select_ocr_region(self, config, config_path) -> None:
+        from yaku.core.config import save_config, update_ocr_region
+        from yaku.ui.region_selector import RegionSelector
+        
+        try:
+            rect = RegionSelector().run_blocking()
+            if rect is not None:
+                update_ocr_region(config, rect)
+                save_config(config, config_path)
+        finally:
+            self.show()
 
     def _select_replacement_region(self) -> None:
-        self._run_command(["--select-replacement-region"])
+        from yaku.core.profiles import resolve_profile
+        config, config_path = resolve_profile(self.profile or "default")
+        
+        self.hide()
+        QTimer.singleShot(200, lambda: self._do_select_replacement_region(config, config_path))
+
+    def _do_select_replacement_region(self, config, config_path) -> None:
+        from PyQt6.QtWidgets import QApplication
+        
+        from yaku.core.config import save_config, update_replacement_region
+        from yaku.core.image_utils import rect_to_normalized
+        from yaku.ui.region_selector import RegionSelector
+        
+        try:
+            rect = RegionSelector().run_blocking()
+            if rect is not None:
+                app = QApplication.instance()
+                if app is not None:
+                    geom = app.primaryScreen().geometry()
+                    norm = rect_to_normalized(rect, geom.width(), geom.height())
+                    update_replacement_region(config, norm)
+                    save_config(config, config_path)
+        finally:
+            self.show()
 
     def _start(self) -> None:
         if self._run_process is not None and self._run_process.poll() is None:
             QMessageBox.information(self, "Yaku", "Yaku is already running.")
             return
+            
         self._run_process = self._run_command(
             [
                 "--mode",
@@ -117,9 +327,14 @@ class MainWindow(QMainWindow):
                 "--run",
             ]
         )
+        if self._run_process is not None:
+            self.process_timer.start()
+            self._update_ui_state()
 
     def _stop(self) -> None:
         self._stop_run_process()
+        self.process_timer.stop()
+        self._update_ui_state()
 
     def _stop_run_process(self) -> None:
         process = self._run_process
@@ -134,7 +349,12 @@ class MainWindow(QMainWindow):
             process.wait(timeout=3)
 
     def _health_check(self) -> None:
-        self._run_command(["--health-check"])
+        from yaku.core.profiles import resolve_profile
+        from yaku.ui.health_check_dialog import HealthCheckDialog
+        
+        config, config_path = resolve_profile(self.profile or "default")
+        dialog = HealthCheckDialog(config, config_path, self)
+        dialog.exec()
 
     def _show_logs(self) -> None:
         path = Path("out") / "yaku.log"
@@ -142,15 +362,36 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Yaku logs", "No log file found yet.")
             return
 
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("Yaku logs")
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Yaku Logs")
+        dialog.resize(760, 480)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        title = QLabel("System Logs")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
+        layout.addWidget(title)
+
         viewer = QTextEdit()
         viewer.setReadOnly(True)
-        viewer.setPlainText(path.read_text(encoding="utf-8", errors="replace")[-8000:])
-        viewer.setMinimumSize(720, 420)
-        dialog.layout().addWidget(viewer, 1, 0, 1, dialog.layout().columnCount())
+        # Read last 12000 chars of logs
+        viewer.setPlainText(path.read_text(encoding="utf-8", errors="replace")[-12000:])
+        # Auto scroll to bottom
+        viewer.verticalScrollBar().setValue(viewer.verticalScrollBar().maximum())
+        layout.addWidget(viewer)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(dialog.accept)
+        btn_layout.addWidget(btn_close)
+        layout.addLayout(btn_layout)
+
         dialog.exec()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self.process_timer.stop()
         self._stop_run_process()
         super().closeEvent(event)

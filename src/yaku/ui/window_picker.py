@@ -149,3 +149,143 @@ def pick_window_cli() -> Optional[WindowInfo]:
         return None
 
     return windows[n - 1]
+
+
+# ---------------------------------------------------------------------------
+# GUI Dialog implementation
+# ---------------------------------------------------------------------------
+
+class WindowPickerDialog:
+    """Helper to dynamically create the dialog subclass with PyQt6 imports."""
+
+    def __new__(cls, parent=None):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import (
+            QDialog,
+            QHBoxLayout,
+            QLabel,
+            QLineEdit,
+            QListWidget,
+            QListWidgetItem,
+            QMessageBox,
+            QPushButton,
+            QVBoxLayout,
+        )
+
+        class Dialog(QDialog):
+            def __init__(self, parent_widget=None) -> None:
+                super().__init__(parent_widget)
+                self.setWindowTitle("Select VN Window")
+                self.resize(580, 420)
+                self.selected_window: Optional[WindowInfo] = None
+
+                layout = QVBoxLayout(self)
+                layout.setSpacing(12)
+                layout.setContentsMargins(16, 16, 16, 16)
+
+                # Search Header
+                search_layout = QHBoxLayout()
+                search_layout.setSpacing(8)
+                search_label = QLabel("Search:")
+                search_label.setStyleSheet("font-weight: bold;")
+                self.search_input = QLineEdit()
+                self.search_input.setPlaceholderText("Type to filter windows by title...")
+                self.search_input.textChanged.connect(self._filter_windows)
+                search_layout.addWidget(search_label)
+                search_layout.addWidget(self.search_input)
+                layout.addLayout(search_layout)
+
+                # List View
+                self.list_widget = QListWidget()
+                self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+                layout.addWidget(self.list_widget)
+
+                # Info status
+                self.info_label = QLabel("Select the target game window to capture.")
+                self.info_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+                layout.addWidget(self.info_label)
+
+                # Action row
+                btn_layout = QHBoxLayout()
+                btn_layout.setSpacing(8)
+                self.btn_refresh = QPushButton("Refresh")
+                self.btn_refresh.clicked.connect(self._refresh_list)
+                
+                self.btn_cancel = QPushButton("Cancel")
+                self.btn_cancel.clicked.connect(self.reject)
+
+                self.btn_select = QPushButton("Select Window")
+                self.btn_select.setObjectName("btn_primary")
+                self.btn_select.clicked.connect(self._on_select)
+
+                btn_layout.addWidget(self.btn_refresh)
+                btn_layout.addStretch()
+                btn_layout.addWidget(self.btn_cancel)
+                btn_layout.addWidget(self.btn_select)
+                layout.addLayout(btn_layout)
+
+                self.windows_list: list[WindowInfo] = []
+                self._refresh_list()
+
+            def _refresh_list(self) -> None:
+                self.list_widget.clear()
+                self.windows_list = list_visible_windows()
+                
+                if not self.windows_list:
+                    item = QListWidgetItem("No visible windows found. Is the game running?")
+                    item.setFlags(Qt.ItemFlag.NoItemFlags)
+                    self.list_widget.addItem(item)
+                    self.btn_select.setEnabled(False)
+                    return
+
+                self.btn_select.setEnabled(True)
+                for w in self.windows_list:
+                    left, top, right, bottom = w.rect
+                    w_width = right - left
+                    w_height = bottom - top
+                    size_str = f"{w_width}×{w_height}"
+                    
+                    # Nice formatted text line for each item
+                    item_text = f"{w.title}   [{size_str} | HWND: {w.hwnd}]"
+                    item = QListWidgetItem(item_text)
+                    item.setData(Qt.ItemDataRole.UserRole, w)
+                    self.list_widget.addItem(item)
+                
+                # Apply filter in case text was typed before refresh
+                self._filter_windows(self.search_input.text())
+
+            def _filter_windows(self, text: str) -> None:
+                text = text.lower().strip()
+                for i in range(self.list_widget.count()):
+                    item = self.list_widget.item(i)
+                    # Don't filter out the 'no windows' message item
+                    if item.flags() == Qt.ItemFlag.NoItemFlags:
+                        continue
+                    item.setHidden(text not in item.text().lower())
+
+            def _on_select(self) -> None:
+                current_item = self.list_widget.currentItem()
+                if current_item is not None and current_item.flags() != Qt.ItemFlag.NoItemFlags:
+                    self.selected_window = current_item.data(Qt.ItemDataRole.UserRole)
+                    self.accept()
+                else:
+                    QMessageBox.warning(self, "Selection Required", "Please select a window from the list.")
+
+            def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
+                if item.flags() != Qt.ItemFlag.NoItemFlags:
+                    self.selected_window = item.data(Qt.ItemDataRole.UserRole)
+                    self.accept()
+
+        return Dialog(parent)
+
+
+def pick_window_gui(parent=None) -> Optional[WindowInfo]:
+    """Show the graphical window picker dialog. Returns the selected WindowInfo or None."""
+    from PyQt6.QtWidgets import QApplication
+    if QApplication.instance() is None:
+        return None
+    dialog = WindowPickerDialog(parent)
+    if dialog.exec():
+        return dialog.selected_window
+    return None
+

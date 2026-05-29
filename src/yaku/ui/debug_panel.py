@@ -20,19 +20,34 @@ class DebugPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowTitle("Yaku Debug")
-        self.resize(480, 340)
+        self.resize(500, 420)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        # Header Section
+        header_layout = QVBoxLayout()
+        header_layout.setSpacing(2)
+        title_lbl = QLabel("Diagnostics Panel")
+        title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        subtitle_lbl = QLabel("Live pipeline latency and translation telemetry.")
+        subtitle_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        header_layout.addWidget(title_lbl)
+        header_layout.addWidget(subtitle_lbl)
+        root.addLayout(header_layout)
 
         form_widget = QWidget()
         form = QFormLayout(form_widget)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setSpacing(8)
 
         def _label(text: str = "-") -> QLabel:
             lbl = QLabel(text)
             lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             lbl.setWordWrap(True)
+            lbl.setStyleSheet("color: #cbd5e1;")
             return lbl
 
         self._ocr_raw = _label()
@@ -43,7 +58,7 @@ class DebugPanel(QWidget):
         self._ocr_ms = _label()
         self._trans_ms = _label()
         self._error = _label()
-        self._error.setStyleSheet("color: #ff6060;")
+        self._error.setStyleSheet("color: #ef4444; font-weight: bold;")
 
         # Latency metrics (rolling averages).
         self._metrics = _label()
@@ -73,11 +88,12 @@ class DebugPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidget(form_widget)
         scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background-color: #0f172a; border: 1px solid #334155; border-radius: 6px;")
         root.addWidget(scroll)
 
         self._log = QTextEdit()
         self._log.setReadOnly(True)
-        self._log.setMaximumHeight(80)
+        self._log.setMaximumHeight(90)
         self._log.setPlaceholderText("Pipeline log")
         root.addWidget(self._log)
 
@@ -124,7 +140,7 @@ class DebugPanel(QWidget):
             )
         )
         self._errors.setText(str(errors_count))
-        self._errors.setStyleSheet("color: #ff6060;" if errors_count else "")
+        self._errors.setStyleSheet("color: #ef4444; font-weight: bold;" if errors_count else "")
 
     def update_input(
         self,
@@ -146,7 +162,7 @@ class DebugPanel(QWidget):
             ok = "ok" if success else "FAILED"
             self._forward_status.setText(ok)
             self._forward_status.setStyleSheet(
-                "color: #60c060;" if success else "color: #ff6060;"
+                "color: #10b981; font-weight: bold;" if success else "color: #ef4444; font-weight: bold;"
             )
             self._log.append(f"[input] {last_input} → {self._mapped.text()} [{ok}]")
 

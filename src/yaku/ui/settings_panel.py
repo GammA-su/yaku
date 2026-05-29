@@ -9,9 +9,11 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -33,12 +35,30 @@ class SettingsPanel(QDialog):
     ) -> None:
         super().__init__(parent, Qt.WindowType.Tool)
         self.setWindowTitle("Yaku Settings")
+        self.resize(500, 480)
         self._config = config
         self._config_path = config_path
         self._on_saved = on_saved
 
         root = QVBoxLayout(self)
+        root.setSpacing(16)
+        root.setContentsMargins(20, 20, 20, 20)
+
+        # Header Section
+        header_layout = QVBoxLayout()
+        header_layout.setSpacing(4)
+        self.title_lbl = QLabel("Configuration Settings")
+        self.title_lbl.setStyleSheet("font-size: 18px; font-weight: bold; color: #ffffff;")
+        self.subtitle_lbl = QLabel("Fine-tune translator parameters and overlay aesthetics.")
+        self.subtitle_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        header_layout.addWidget(self.title_lbl)
+        header_layout.addWidget(self.subtitle_lbl)
+        root.addLayout(header_layout)
+
+        # Config Form
         form = QFormLayout()
+        form.setSpacing(12)
+        form.setContentsMargins(4, 8, 4, 8)
         root.addLayout(form)
 
         self._backend = QComboBox()
@@ -74,29 +94,39 @@ class SettingsPanel(QDialog):
         self._font_size = QSpinBox()
         self._font_size.setRange(8, 96)
         self._font_size.setValue(config.v1_overlay.font_size)
-        form.addRow("Font size", self._font_size)
+        form.addRow("Font size (px)", self._font_size)
 
-        self._click_through = QCheckBox()
+        self._click_through = QCheckBox("Enable click-through overlay")
         self._click_through.setChecked(config.v1_overlay.click_through)
-        form.addRow("Click-through", self._click_through)
+        form.addRow("Overlay interaction", self._click_through)
 
-        self._locked = QCheckBox()
+        self._locked = QCheckBox("Lock position and size")
         self._locked.setChecked(config.v1_overlay.locked)
-        form.addRow("Lock overlay", self._locked)
+        form.addRow("Overlay bounds", self._locked)
 
         self._tick_ms = QSpinBox()
         self._tick_ms.setRange(50, 5000)
         self._tick_ms.setSingleStep(50)
         self._tick_ms.setValue(config.app.tick_ms)
-        form.addRow("Tick ms", self._tick_ms)
+        form.addRow("Tick interval (ms)", self._tick_ms)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        # Action Buttons Layout (replacing standard QDialogButtonBox)
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_cancel.setMinimumWidth(80)
+
+        self.btn_save = QPushButton("Save Settings")
+        self.btn_save.setObjectName("btn_primary")
+        self.btn_save.clicked.connect(self._save)
+        self.btn_save.setMinimumWidth(110)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_save)
+        root.addLayout(btn_layout)
 
     def _save(self) -> None:
         self._config.translator.backend = self._backend.currentText()  # type: ignore[assignment]

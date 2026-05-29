@@ -41,6 +41,8 @@ def ensure_qapplication() -> "QApplication":
         _app = existing  # type: ignore[assignment]
     if _app is None:
         _app = QApplication(sys.argv)
+        from yaku.ui.style_sheets import GLOBAL_STYLE
+        _app.setStyleSheet(GLOBAL_STYLE)
     return _app
 
 
