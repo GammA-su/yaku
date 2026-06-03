@@ -25,6 +25,7 @@ class CheckResultWidget(QWidget):
 
     def __init__(self, check_result, parent=None):
         super().__init__(parent)
+        self.setMinimumHeight(52)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(16)
@@ -131,6 +132,7 @@ class HealthCheckDialog(QDialog):
             self.list_widget.addItem(item)
 
             widget = CheckResultWidget(r)
+            widget.adjustSize()
             item.setSizeHint(widget.sizeHint())
             self.list_widget.setItemWidget(item, widget)
 

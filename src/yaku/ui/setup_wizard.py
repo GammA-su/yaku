@@ -197,6 +197,7 @@ def _create_setup_wizard(profile: str | None = None, config_path: str | None = N
             super().__init__()
             self.setWindowTitle("Yaku Setup Wizard")
             self.resize(620, 430)
+            self.setWizardStyle(QWizard.WizardStyle.ClassicStyle)
             self._apply_theme()
 
             self.profile_input = QLineEdit(profile or "")
@@ -216,12 +217,8 @@ def _create_setup_wizard(profile: str | None = None, config_path: str | None = N
         def _apply_theme(self) -> None:
             self.setStyleSheet(
                 """
-                QWizard {
-                    background: #0b0f19;
-                    color: #f8fafc;
-                }
-                QWizardPage {
-                    background: #0b0f19;
+                QWizard, QWizardPage {
+                    background-color: #0b0f19;
                     color: #f8fafc;
                 }
                 QLabel {
@@ -320,8 +317,7 @@ def _create_setup_wizard(profile: str | None = None, config_path: str | None = N
             page.setTitle("Window and OCR")
             layout = QVBoxLayout(page)
             text = QLabel(
-                "After setup, use Pick Window and Draw OCR Rectangle from the "
-                "launcher to bind the visual novel window and capture area."
+                "After setup, use Draw OCR Rectangle from the launcher to bind the capture area."
             )
             text.setWordWrap(True)
             text.setAlignment(Qt.AlignmentFlag.AlignTop)

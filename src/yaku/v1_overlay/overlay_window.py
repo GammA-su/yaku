@@ -59,12 +59,15 @@ class OverlayWindow(QWidget):
             | Qt.WindowType.Tool,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
 
         self._config = config
         self._locked: bool = config.locked
         self._bg_alpha: int = int(config.background_opacity * 255)
         self._drag_start: Optional[QPoint] = None
         self._window_start: Optional[QPoint] = None
+        self._resize_mode: Optional[str] = None
+        self._window_geom_start = None
 
         # ----- layout -----
         layout = QVBoxLayout(self)
@@ -72,17 +75,20 @@ class OverlayWindow(QWidget):
         layout.setSpacing(2)
 
         self._status_label = QLabel("")
+        self._status_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._status_label.setFixedHeight(16)
         self._status_label.setVisible(config.show_status_badge)
         layout.addWidget(self._status_label)
 
         self._source_label = QLabel("")
+        self._source_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._source_label.setWordWrap(True)
         self._source_label.setVisible(False)
         layout.addWidget(self._source_label)
 
         self._trans_label = QLabel("")
+        self._trans_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._trans_label.setWordWrap(True)
         self._trans_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -222,22 +228,71 @@ class OverlayWindow(QWidget):
 
     def mousePressEvent(self, event) -> None:
         if not self._locked and event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position().toPoint()
+            w = self.width()
+            h = self.height()
+            margin = 12
+
+            in_right = pos.x() >= w - margin
+            in_bottom = pos.y() >= h - margin
+
             self._drag_start = event.globalPosition().toPoint()
+            self._window_geom_start = self.geometry()
             self._window_start = self.pos()
 
+            if in_right and in_bottom:
+                self._resize_mode = "bottom-right"
+            elif in_right:
+                self._resize_mode = "right"
+            elif in_bottom:
+                self._resize_mode = "bottom"
+            else:
+                self._resize_mode = None
+
     def mouseMoveEvent(self, event) -> None:
-        if (
-            not self._locked
-            and self._drag_start is not None
-            and self._window_start is not None
-        ):
-            delta = event.globalPosition().toPoint() - self._drag_start
-            self.move(self._window_start + delta)
+        if self._locked:
+            super().mouseMoveEvent(event)
+            return
+
+        w = self.width()
+        h = self.height()
+        margin = 12
+
+        if event.buttons() == Qt.MouseButton.NoButton:
+            pos = event.position().toPoint()
+            in_right = pos.x() >= w - margin
+            in_bottom = pos.y() >= h - margin
+
+            if in_right and in_bottom:
+                self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            elif in_right:
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif in_bottom:
+                self.setCursor(Qt.CursorShape.SizeVerCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            if self._drag_start is not None:
+                delta = event.globalPosition().toPoint() - self._drag_start
+                if self._resize_mode == "bottom-right":
+                    new_w = max(150, self._window_geom_start.width() + delta.x())
+                    new_h = max(80, self._window_geom_start.height() + delta.y())
+                    self.resize(new_w, new_h)
+                elif self._resize_mode == "right":
+                    new_w = max(150, self._window_geom_start.width() + delta.x())
+                    self.resize(new_w, self.height())
+                elif self._resize_mode == "bottom":
+                    new_h = max(80, self._window_geom_start.height() + delta.y())
+                    self.resize(self.width(), new_h)
+                elif self._window_start is not None:
+                    self.move(self._window_start + delta)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start = None
             self._window_start = None
+            self._resize_mode = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def contextMenuEvent(self, event) -> None:
         menu = QMenu(self)

@@ -66,9 +66,36 @@ class LlamaCppTranslator(BaseTranslator):
         _transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
         self._config = config
-        self._base_url = _normalize_base_url(config.base_url)
+        
+        if config.use_hosted:
+            base_url = "https://llm.iosys.fr/v1"
+            self._model = "qwen-local"
+            self._temperature = 0.2
+            self._max_tokens = 128
+            api_key = "longapikey"
+        else:
+            base_url = config.base_url
+            if config.port:
+                base_url = f"http://127.0.0.1:{config.port}/v1"
+            self._model = config.model
+            self._temperature = config.temperature
+            self._max_tokens = config.max_tokens
+            
+            api_key = ""
+            if config.api_key_env:
+                import os
+                from yaku.core.env import load_env_file
+                load_env_file()
+                api_key = os.environ.get(config.api_key_env, "")
+
+        self._base_url = _normalize_base_url(base_url)
         self._completions_url = f"{self._base_url}/chat/completions"
-        self._client = httpx.Client(timeout=30.0, transport=_transport)
+        
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+                
+        self._client = httpx.Client(timeout=30.0, transport=_transport, headers=headers)
 
     # ------------------------------------------------------------------
     # BaseTranslator interface
@@ -80,7 +107,7 @@ class LlamaCppTranslator(BaseTranslator):
 
     @property
     def backend_model(self) -> str | None:
-        return self._config.model
+        return self._model
 
     def translate(
         self,
@@ -93,23 +120,33 @@ class LlamaCppTranslator(BaseTranslator):
         user_msg = build_user_message(text, context, glossary)
 
         body = {
-            "model": self._config.model,
+            "model": self._model,
             "messages": [
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": user_msg},
             ],
-            "temperature": self._config.temperature,
-            "max_tokens": self._config.max_tokens,
+            "temperature": self._temperature,
+            "max_tokens": self._max_tokens,
         }
 
         try:
             resp = self._client.post(self._completions_url, json=body)
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            if self._config.use_hosted and exc.response.status_code >= 500:
+                raise TranslationError(
+                    "LLM is not up, Please use one locally, sorry for the inconvenience."
+                ) from exc
             raise TranslationError(
                 f"llama.cpp API error {exc.response.status_code}: {exc.response.text}"
             ) from exc
         except httpx.RequestError as exc:
+            if self._config.use_hosted:
+                raise TranslationError(
+                    "LLM is not up, Please use one locally, sorry for the inconvenience."
+                ) from exc
+            raise TranslationError(f"llama.cpp request failed: {exc}") from exc
+        except Exception as exc:
             raise TranslationError(f"llama.cpp request failed: {exc}") from exc
 
         data = resp.json()
@@ -125,7 +162,7 @@ class LlamaCppTranslator(BaseTranslator):
             translated_text=_strip_response(raw_text),
             target_lang=target_lang,
             backend="llama_cpp",
-            backend_model=self._config.model,
+            backend_model=self._model,
             raw=data,
         )
 

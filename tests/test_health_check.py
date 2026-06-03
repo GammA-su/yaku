@@ -76,6 +76,37 @@ def test_deepl_key_present_passes(monkeypatch):
     assert "super-secret-value" not in res.message
 
 
+def test_deepl_key_in_settings_passes():
+    cfg = YakuConfig()
+    cfg.translator.deepl.api_key = "settings-key-here"
+    res = check_deepl_key(cfg)
+    assert res.status == PASS
+    assert "configured in settings" in res.message
+
+
+def test_check_llama_cpp_port_derived(monkeypatch):
+    from yaku.ui.health_check import check_llama_cpp
+    cfg = YakuConfig()
+    cfg.translator.llama_cpp.port = 12345
+    cfg.translator.llama_cpp.base_url = "http://example.com/v1"
+    
+    requested_urls = []
+    
+    class FakeResponse:
+        status_code = 200
+    
+    def fake_get(url, timeout=None):
+        requested_urls.append(url)
+        return FakeResponse()
+    
+    import httpx
+    monkeypatch.setattr(httpx, "get", fake_get)
+    
+    res = check_llama_cpp(cfg)
+    assert res.status == PASS
+    assert "http://127.0.0.1:12345/v1/models" in requested_urls
+
+
 def test_ocr_dummy_passes():
     cfg = YakuConfig()
     cfg.ocr.backend = "dummy"

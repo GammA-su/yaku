@@ -61,14 +61,52 @@ class MainWindow(QMainWindow):
         
         header_layout.addStretch()
         
-        self.profile_badge = QLabel(f"Profile: {profile or 'default'}")
-        self.profile_badge.setStyleSheet(
+        # Profile selector dropdown instead of badge
+        self.profile_combo = QComboBox()
+        self.profile_combo.setObjectName("profile_combo")
+        self.profile_combo.setMinimumWidth(160)
+        self.profile_combo.setStyleSheet(
+            "QComboBox#profile_combo {"
             "color: #6366f1; background-color: #1e1b4b; "
             "border: 1px solid #312e81; border-radius: 12px; "
-            "padding: 4px 12px; font-weight: bold; font-size: 11px;"
+            "padding: 4px 12px 4px 12px; font-weight: bold; font-size: 11px;"
+            "}"
+            "QComboBox#profile_combo::drop-down {"
+            "subcontrol-origin: padding; subcontrol-position: top right;"
+            "width: 20px; border-left: none; background: transparent;"
+            "}"
+            "QComboBox#profile_combo::down-arrow {"
+            "image: none; border: solid #6366f1; border-width: 0 2px 2px 0;"
+            "display: inline-block; padding: 2px; width: 4px; height: 4px;"
+            "transform: rotate(45deg); margin-right: 8px;"
+            "}"
+            "QComboBox#profile_combo QAbstractItemView {"
+            "background-color: #1e1b4b; border: 1px solid #312e81;"
+            "selection-background-color: #4f46e5; selection-color: #ffffff;"
+            "color: #6366f1;"
+            "}"
         )
-        self.profile_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(self.profile_badge)
+        header_layout.addWidget(self.profile_combo)
+
+        # Settings button next to profile selector
+        self.btn_settings = QPushButton("Settings")
+        self.btn_settings.setObjectName("btn_settings")
+        self.btn_settings.setMinimumWidth(90)
+        self.btn_settings.setStyleSheet(
+            "QPushButton#btn_settings {"
+            "color: #f8fafc; background-color: #1e293b; "
+            "border: 1px solid #334155; border-radius: 12px; "
+            "padding: 4px 12px; font-weight: bold; font-size: 11px;"
+            "min-height: 18px;"
+            "}"
+            "QPushButton#btn_settings:hover {"
+            "background-color: #334155; "
+            "border-color: #6366f1;"
+            "}"
+        )
+        self.btn_settings.clicked.connect(self._open_settings)
+        header_layout.addWidget(self.btn_settings)
+
         main_layout.addWidget(header_widget)
 
         # 2. Columns Row (Dashboard controls + Settings)
@@ -161,9 +199,48 @@ class MainWindow(QMainWindow):
         self.process_timer.setInterval(500)
         self.process_timer.timeout.connect(self._monitor_process)
 
+        # Setup profile combo items and connect slot
+        self._refresh_profiles()
+        self.profile_combo.currentTextChanged.connect(self._on_profile_changed)
+
         # Load configuration values into inputs
         self._load_config_into_ui()
+
+        # Connect change signals for quick config inputs
+        self.mode_combo.currentTextChanged.connect(self._save_quick_config)
+        self.translator_combo.currentTextChanged.connect(self._save_quick_config)
+        self.target_lang_input.editingFinished.connect(self._save_quick_config)
+
         self._update_ui_state()
+
+    def _refresh_profiles(self) -> None:
+        from yaku.core.profiles import list_profiles
+
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+
+        profiles = list_profiles()
+        if "default" not in profiles:
+            profiles.insert(0, "default")
+
+        self.profile_combo.addItems(profiles)
+
+        active = self.profile or "default"
+        index = self.profile_combo.findText(active)
+        if index >= 0:
+            self.profile_combo.setCurrentIndex(index)
+            self.profile = active
+        else:
+            self.profile_combo.setCurrentIndex(0)
+            self.profile = self.profile_combo.currentText()
+
+        self.profile_combo.blockSignals(False)
+
+    def _on_profile_changed(self, text: str) -> None:
+        if not text:
+            return
+        self.profile = text
+        self._load_config_into_ui()
 
     def _load_config_into_ui(self) -> None:
         from yaku.core.config import load_config, YakuConfig
@@ -178,6 +255,11 @@ class MainWindow(QMainWindow):
             else:
                 config, _ = resolve_profile("default")
                 
+            # Block signals so we don't save back while loading
+            self.mode_combo.blockSignals(True)
+            self.translator_combo.blockSignals(True)
+            self.target_lang_input.blockSignals(True)
+
             # Set mode combobox
             mode = config.app.mode or "v1-overlay"
             index = self.mode_combo.findText(mode)
@@ -195,6 +277,31 @@ class MainWindow(QMainWindow):
             self.target_lang_input.setText(config.app.target_lang or "en")
         except Exception as exc:  # noqa: BLE001
             print(f"[yaku] Failed to load config into UI: {exc}")
+        finally:
+            self.mode_combo.blockSignals(False)
+            self.translator_combo.blockSignals(False)
+            self.target_lang_input.blockSignals(False)
+
+    def _save_quick_config(self) -> None:
+        from yaku.core.config import save_config
+        from yaku.core.profiles import resolve_profile
+        try:
+            config, config_path = resolve_profile(self.profile or "default")
+            config.app.mode = self.mode_combo.currentText()  # type: ignore[assignment]
+            backend_val = self.translator_combo.currentText()
+            config.translator.backend = "llama_cpp" if backend_val == "llama-cpp" else "deepl"  # type: ignore[assignment]
+            config.app.target_lang = self.target_lang_input.text().strip() or "en"
+            save_config(config, config_path)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[yaku] Failed to save quick config: {exc}")
+
+    def _open_settings(self) -> None:
+        from yaku.core.profiles import resolve_profile
+        from yaku.ui.settings_panel import SettingsPanel
+        
+        config, config_path = resolve_profile(self.profile or "default")
+        dialog = SettingsPanel(config, config_path, self, on_saved=self._load_config_into_ui)
+        dialog.exec()
 
     def _update_ui_state(self) -> None:
         is_running = self._run_process is not None and self._run_process.poll() is None
@@ -232,7 +339,10 @@ class MainWindow(QMainWindow):
                 self._update_ui_state()
 
     def _base_command(self) -> list[str]:
-        cmd = [sys.executable, "-m", "yaku.main"]
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable]
+        else:
+            cmd = [sys.executable, "-m", "yaku.main"]
         if self.profile:
             cmd.extend(["--profile", self.profile])
         if self.config_path:
@@ -250,6 +360,9 @@ class MainWindow(QMainWindow):
         from yaku.ui.setup_wizard import SetupWizard
         wizard = SetupWizard(profile=self.profile, config_path=self.config_path)
         if wizard.exec():
+            raw_profile = wizard.profile_input.text().strip() or self.profile or "default"
+            self.profile = raw_profile
+            self._refresh_profiles()
             self._load_config_into_ui()
 
     def _pick_window(self) -> None:

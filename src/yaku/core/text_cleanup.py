@@ -15,6 +15,21 @@ _FULLWIDTH_SPACE = "　"
 # Primary entry point
 # ---------------------------------------------------------------------------
 
+def is_east_asian(c: str) -> bool:
+    """Check if character is in CJK/Japanese ranges (including full-width punctuation)."""
+    return any(
+        ord(c) in range(start, end + 1)
+        for start, end in [
+            (0x3000, 0x303F),  # CJK Symbols and Punctuation (。、「」 etc)
+            (0x3040, 0x309F),  # Hiragana
+            (0x30A0, 0x30FF),  # Katakana
+            (0x4E00, 0x9FFF),  # CJK Unified Ideographs (Kanji)
+            (0x3400, 0x4DBF),  # CJK Extension A
+            (0xFF00, 0xFFEF),  # Halfwidth and Fullwidth Forms
+        ]
+    )
+
+
 def cleanup_ocr_text(text: str) -> str:
     """Normalize raw OCR output for downstream processing.
 
@@ -25,7 +40,9 @@ def cleanup_ocr_text(text: str) -> str:
     3. Remove blank / whitespace-only lines.
     4. Remove consecutive duplicate lines (OCR double-read artefacts).
     5. Collapse runs of ASCII whitespace *within* each line to a single space.
-    6. Join remaining lines with ``\\n``.
+    6. Join remaining lines smartly:
+       - No spaces between consecutive East Asian (Japanese/Chinese) characters.
+       - Spaces between other characters.
 
     Invariants:
 
@@ -49,7 +66,23 @@ def cleanup_ocr_text(text: str) -> str:
     # Step 5 — collapse intra-line whitespace runs
     lines = [re.sub(r"[ \t]+", " ", ln) for ln in lines]
 
-    return "\n".join(lines)
+    if not lines:
+        return ""
+
+    # Step 6 — smart line joining
+    result = lines[0]
+    for next_line in lines[1:]:
+        if not result or not next_line:
+            continue
+        last_char = result[-1]
+        first_char = next_line[0]
+
+        if is_east_asian(last_char) and is_east_asian(first_char):
+            result += next_line
+        else:
+            result += " " + next_line
+
+    return re.sub(r" +", " ", result)
 
 
 # ---------------------------------------------------------------------------

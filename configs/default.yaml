@@ -38,6 +38,9 @@ translator:
     max_tokens: 256
     model: qwen-local
     temperature: 0.2
+    use_hosted: true
+    api_key_env: longapikey
+    disable_reasoning: true
 v1_overlay:
   background_opacity: 0.55
   click_through: true

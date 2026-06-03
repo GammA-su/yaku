@@ -257,3 +257,39 @@ def test_http_500_raises_translation_error():
     with pytest.raises(TranslationError) as exc_info:
         translator.translate("text", [], "en")
     assert "500" in str(exc_info.value)
+
+
+def test_port_override_derives_url():
+    config = LlamaCppConfig(port=9999, base_url="http://example.com/v1")
+    transport = _CapturingTransport(_completion_response())
+    translator = LlamaCppTranslator(config, _transport=transport)
+    translator.translate("text", [], "en")
+    url = str(transport.last_request.url)
+    assert "http://127.0.0.1:9999/v1/chat/completions" in url
+
+
+def test_hosted_llm_unreachable_raises_custom_error():
+    config = LlamaCppConfig(use_hosted=True)
+
+    class _FailingTransport(httpx.BaseTransport):
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("Connection refused")
+
+    translator = LlamaCppTranslator(config, _transport=_FailingTransport())
+    with pytest.raises(TranslationError) as exc_info:
+        translator.translate("text", [], "en")
+    assert "LLM is not up, Please use one locally, sorry for the inconvenience." in str(exc_info.value)
+
+
+def test_hosted_llm_unauthorized_raises_401():
+    config = LlamaCppConfig(use_hosted=True)
+
+    class _UnauthorizedTransport(httpx.BaseTransport):
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, text="Unauthorized key")
+
+    translator = LlamaCppTranslator(config, _transport=_UnauthorizedTransport())
+    with pytest.raises(TranslationError) as exc_info:
+        translator.translate("text", [], "en")
+    assert "401" in str(exc_info.value)
+    assert "Unauthorized key" in str(exc_info.value)

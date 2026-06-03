@@ -82,19 +82,24 @@ def check_translator(config: YakuConfig) -> CheckResult:
 def check_deepl_key(config: YakuConfig) -> CheckResult:
     load_env_file()
     env = config.translator.deepl.api_key_env
+    if config.translator.deepl.api_key:
+        return CheckResult("DeepL API key", PASS, "API key is configured in settings (not validated).")
     if os.environ.get(env):
         # Never log the value itself.
-        return CheckResult("DeepL API key", PASS, f"{env} is set (not validated).")
+        return CheckResult("DeepL API key", PASS, f"{env} is set in environment (not validated).")
     return CheckResult(
         "DeepL API key",
         FAIL,
-        f"{env} is not set. PowerShell: $env:{env}=\"...\"  |  bash: export {env}=...",
+        f"{env} is not set in environment and no key configured in settings. Set it in Settings.",
     )
 
 
 def check_llama_cpp(config: YakuConfig, *, timeout: float = 2.0) -> CheckResult:
     """Best-effort GET of the llama.cpp ``/models`` endpoint (never fatal)."""
-    base = config.translator.llama_cpp.base_url.rstrip("/")
+    base = config.translator.llama_cpp.base_url
+    if config.translator.llama_cpp.port:
+        base = f"http://127.0.0.1:{config.translator.llama_cpp.port}/v1"
+    base = base.rstrip("/")
     url = f"{base}/models"
     try:
         import httpx

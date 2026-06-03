@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -77,6 +78,30 @@ class SettingsPanel(QDialog):
         self._target_lang.setCurrentText(config.app.target_lang)
         form.addRow("Target language", self._target_lang)
 
+        # DeepL API Key input
+        self._deepl_key = QLineEdit()
+        self._deepl_key.setText(config.translator.deepl.api_key or "")
+        self._deepl_key.setPlaceholderText("Enter DeepL API Key (prioritized)...")
+        form.addRow("DeepL API Key", self._deepl_key)
+
+        # llama.cpp Hosted LLM checkbox
+        self._use_hosted = QCheckBox("Use hosted LLM (https://llm.iosys.fr/v1)")
+        self._use_hosted.setChecked(config.translator.llama_cpp.use_hosted)
+        self._use_hosted.toggled.connect(self._on_use_hosted_changed)
+        form.addRow("Hosted LLM", self._use_hosted)
+
+        # llama.cpp Port input
+        self._llamacpp_port = QSpinBox()
+        self._llamacpp_port.setRange(1, 65535)
+        self._llamacpp_port.setValue(config.translator.llama_cpp.port or 8080)
+        form.addRow("llama.cpp Port", self._llamacpp_port)
+
+        # llama.cpp Address input
+        self._llamacpp_address = QLineEdit()
+        self._llamacpp_address.setText(config.translator.llama_cpp.base_url or "")
+        self._llamacpp_address.setPlaceholderText("Enter llama.cpp base URL (e.g., http://127.0.0.1:8080/v1)...")
+        form.addRow("llama.cpp Address", self._llamacpp_address)
+
         self._overlay_opacity = QDoubleSpinBox()
         self._overlay_opacity.setRange(0.10, 1.00)
         self._overlay_opacity.setSingleStep(0.05)
@@ -110,6 +135,8 @@ class SettingsPanel(QDialog):
         self._tick_ms.setValue(config.app.tick_ms)
         form.addRow("Tick interval (ms)", self._tick_ms)
 
+        self._on_use_hosted_changed(config.translator.llama_cpp.use_hosted)
+
         # Action Buttons Layout (replacing standard QDialogButtonBox)
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
@@ -132,6 +159,14 @@ class SettingsPanel(QDialog):
         self._config.translator.backend = self._backend.currentText()  # type: ignore[assignment]
         self._config.ocr.backend = self._ocr_backend.currentText()  # type: ignore[assignment]
         self._config.app.target_lang = self._target_lang.currentText().strip() or "en"
+        
+        # Save our new settings fields
+        deepl_key = self._deepl_key.text().strip()
+        self._config.translator.deepl.api_key = deepl_key if deepl_key else None
+        self._config.translator.llama_cpp.port = self._llamacpp_port.value()
+        self._config.translator.llama_cpp.base_url = self._llamacpp_address.text().strip() or None
+        self._config.translator.llama_cpp.use_hosted = self._use_hosted.isChecked()
+
         self._config.v1_overlay.opacity = self._overlay_opacity.value()
         self._config.v1_overlay.background_opacity = self._background_opacity.value()
         self._config.v1_overlay.font_size = self._font_size.value()
@@ -144,3 +179,7 @@ class SettingsPanel(QDialog):
         if self._on_saved is not None:
             self._on_saved()
         self.accept()
+
+    def _on_use_hosted_changed(self, checked: bool) -> None:
+        self._llamacpp_port.setEnabled(not checked)
+        self._llamacpp_address.setEnabled(not checked)

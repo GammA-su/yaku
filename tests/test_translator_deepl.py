@@ -83,6 +83,19 @@ def test_missing_custom_env_var_name(monkeypatch, tmp_path):
     assert "MY_DEEPL_KEY" in str(exc_info.value)
 
 
+def test_deepl_key_priority_config_over_env(monkeypatch):
+    # Set both config.api_key and env var, config should win
+    config = DeepLConfig(api_key="settings-key-wins")
+    monkeypatch.setenv("DEEPL_API_KEY", "env-key-lost")
+    
+    transport = _CapturingTransport(_deepl_ok("Success"))
+    translator = DeepLTranslator(config, _transport=transport)
+    
+    # Verify the client headers set the settings key
+    auth_header = translator._client.headers.get("Authorization")
+    assert auth_header == "DeepL-Auth-Key settings-key-wins"
+
+
 # ---------------------------------------------------------------------------
 # Successful translation
 # ---------------------------------------------------------------------------

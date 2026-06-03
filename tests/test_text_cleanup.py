@@ -27,27 +27,27 @@ def test_cleanup_multiple_fullwidth_spaces():
 
 def test_cleanup_removes_empty_lines():
     result = cleanup_ocr_text("line one\n\nline two")
-    assert result == "line one\nline two"
+    assert result == "line one line two"
 
 
 def test_cleanup_removes_whitespace_only_lines():
     result = cleanup_ocr_text("line one\n   \nline two")
-    assert result == "line one\nline two"
+    assert result == "line one line two"
 
 
 def test_cleanup_deduplicates_consecutive_lines():
     text = "こんにちは\nこんにちは\nありがとう"
-    assert cleanup_ocr_text(text) == "こんにちは\nありがとう"
+    assert cleanup_ocr_text(text) == "こんにちはありがとう"
 
 
 def test_cleanup_triple_consecutive_deduplicates_to_one():
     text = "A\nA\nA\nB"
-    assert cleanup_ocr_text(text) == "A\nB"
+    assert cleanup_ocr_text(text) == "A B"
 
 
 def test_cleanup_keeps_non_consecutive_duplicates():
     text = "A\nB\nA"
-    assert cleanup_ocr_text(text) == "A\nB\nA"
+    assert cleanup_ocr_text(text) == "A B A"
 
 
 def test_cleanup_preserves_japanese_punctuation():
@@ -69,7 +69,7 @@ def test_cleanup_collapses_intraline_ascii_spaces():
 
 def test_cleanup_strips_line_leading_trailing_space():
     result = cleanup_ocr_text("  hello  \n  world  ")
-    assert result == "hello\nworld"
+    assert result == "hello world"
 
 
 def test_cleanup_empty_string():

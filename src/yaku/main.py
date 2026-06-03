@@ -7,6 +7,17 @@ from pathlib import Path
 from typing import Callable
 
 
+# Monkey-patch paddlex dependency checks to bypass PyInstaller metadata issues
+try:
+    import paddlex.utils.deps
+    paddlex.utils.deps.is_dep_available = lambda *args, **kwargs: True
+    paddlex.utils.deps.is_extra_available = lambda *args, **kwargs: True
+    paddlex.utils.deps.require_deps = lambda *args, **kwargs: None
+    paddlex.utils.deps.require_extra = lambda *args, **kwargs: None
+except BaseException:
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Graceful-shutdown helper
 # ---------------------------------------------------------------------------
@@ -120,11 +131,13 @@ def _cmd_run_v1(config, config_path: Path) -> int:
     cache = YakuCache(cache_path)
 
     # --- OCR backend ---
+    from yaku.core.logging import get_logger
+    main_logger = get_logger("main")
     try:
         from yaku.ocr.factory import create_ocr
         ocr = create_ocr(config.ocr)
     except Exception as exc:
-        print(f"[yaku] OCR backend unavailable ({exc}), using DummyOCR.")
+        main_logger.exception("OCR backend unavailable, using DummyOCR.")
         from yaku.ocr.dummy import DummyOCR
         ocr = DummyOCR("[OCR not configured]")
 
@@ -133,7 +146,7 @@ def _cmd_run_v1(config, config_path: Path) -> int:
         from yaku.translate.factory import create_translator
         translator = create_translator(config.translator)
     except Exception as exc:
-        print(f"[yaku] Translator backend unavailable ({exc}), using NullTranslator.")
+        main_logger.exception("Translator backend unavailable, using NullTranslator.")
         from yaku.translate.base import NullTranslator
         translator = NullTranslator()
 
@@ -143,8 +156,7 @@ def _cmd_run_v1(config, config_path: Path) -> int:
         from yaku.core.capture import create_capture
         capture = create_capture(config.window)
     except Exception as exc:
-        print(f"[yaku] Capture backend unavailable ({exc}).")
-        print("       Install a capture backend: uv add dxcam / uv add mss")
+        main_logger.exception("Capture backend unavailable.")
 
     # --- Pipeline ---
     pipeline = V1Pipeline(ocr, translator, cache, config, capture=capture)
@@ -203,11 +215,13 @@ def _cmd_run_v2(config, config_path: Path) -> int:
     cache = YakuCache(cache_path)
 
     # --- OCR backend ---
+    from yaku.core.logging import get_logger
+    main_logger = get_logger("main")
     try:
         from yaku.ocr.factory import create_ocr
         ocr = create_ocr(config.ocr)
     except Exception as exc:
-        print(f"[yaku] OCR backend unavailable ({exc}), using DummyOCR.")
+        main_logger.exception("OCR backend unavailable, using DummyOCR.")
         from yaku.ocr.dummy import DummyOCR
         ocr = DummyOCR("[OCR not configured]")
 
@@ -216,7 +230,7 @@ def _cmd_run_v2(config, config_path: Path) -> int:
         from yaku.translate.factory import create_translator
         translator = create_translator(config.translator)
     except Exception as exc:
-        print(f"[yaku] Translator backend unavailable ({exc}), using NullTranslator.")
+        main_logger.exception("Translator backend unavailable, using NullTranslator.")
         from yaku.translate.base import NullTranslator
         translator = NullTranslator()
 
@@ -226,8 +240,7 @@ def _cmd_run_v2(config, config_path: Path) -> int:
         from yaku.core.capture import create_capture
         capture = create_capture(config.window)
     except Exception as exc:
-        print(f"[yaku] Capture backend unavailable ({exc}).")
-        print("       Install a capture backend: uv add dxcam / uv add mss")
+        main_logger.exception("Capture backend unavailable.")
 
     # --- Pipeline + renderer ---
     pipeline = V2Pipeline(ocr, translator, cache, config)

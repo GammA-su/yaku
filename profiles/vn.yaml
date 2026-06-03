@@ -21,28 +21,23 @@ ocr:
   hash_threshold: 0
   min_chars: 1
   region:
-    h: 156
-    w: 675
-    x: 675
-    y: 874
+    h: 152
+    w: 724
+    x: 644
+    y: 864
 translator:
-  backend: llama_cpp
+  backend: deepl
   context_lines: 3
   deepl:
-    api_key: null
     api_key_env: DEEPL_API_KEY
     formality: default
     target_lang: EN-US
     use_context: true
   llama_cpp:
-    api_key_env: longapikey
     base_url: http://127.0.0.1:8080/v1
-    disable_reasoning: true
     max_tokens: 256
     model: qwen-local
-    port: 8080
     temperature: 0.2
-    use_hosted: true
 v1_overlay:
   background_opacity: 0.55
   click_through: true

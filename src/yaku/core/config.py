@@ -46,13 +46,18 @@ class OCRConfig(BaseModel):
 
 
 class LlamaCppConfig(BaseModel):
+    port: int = 8080
     base_url: str = "http://127.0.0.1:8080/v1"
     model: str = "qwen-local"
     temperature: float = 0.2
     max_tokens: int = 256
+    use_hosted: bool = False
+    api_key_env: str = "longapikey"
+    disable_reasoning: bool = True
 
 
 class DeepLConfig(BaseModel):
+    api_key: Optional[str] = None
     api_key_env: str = "DEEPL_API_KEY"
     target_lang: str = "EN-US"
     formality: str = "default"

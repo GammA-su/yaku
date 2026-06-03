@@ -29,11 +29,11 @@ class DeepLTranslator(BaseTranslator):
         _transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
         load_env_file()
-        api_key = os.environ.get(config.api_key_env, "")
+        api_key = config.api_key or os.environ.get(config.api_key_env, "")
         if not api_key:
             raise TranslationError(
-                f"{config.api_key_env} is missing. "
-                "Set it or use --translator llama-cpp."
+                f"{config.api_key_env} is missing in environment and no API key set in settings. "
+                "Configure it in Settings or use --translator llama-cpp."
             )
         self._config = config
         self._client = httpx.Client(
