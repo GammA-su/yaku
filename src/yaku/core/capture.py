@@ -198,4 +198,51 @@ def create_capture(config: WindowConfig) -> BaseCapture:
             "  uv add mss    (cross-platform)"
         )
 
-    raise InvalidBackendError(f"Unknown capture backend: '{backend}'")
+    raise InvalidBackendError(
+        f"Unknown capture backend: '{backend}'. "
+        "Valid choices: dxcam, mss, win32, auto"
+    )
+
+
+def normalize_screen_rect_to_window(
+    rect: Rect,
+    window_config: WindowConfig,
+    screen_w: int,
+    screen_h: int,
+) -> NormalizedRect:
+    """Translate absolute screen coordinates of *rect* into target-window local coords.
+
+    Then normalise them relative to the captured frame size.  Falls back to
+    normalising relative to *screen_w* × *screen_h* if capture cannot be
+    opened (e.g. game closed).
+    """
+    from yaku.core.image_utils import rect_to_normalized, NormalizedRect
+    ox, oy = 0, 0
+    w, h = screen_w, screen_h
+    capture = None
+    try:
+        capture = create_capture(window_config)
+        ox, oy = capture.source_origin()
+        frame = capture.capture_frame()
+        if frame is not None:
+            w, h = frame.width, frame.height
+    except Exception as exc:
+        from yaku.core.logging import get_logger
+        get_logger("capture").warning(
+            "Could not get window capture coordinates (%s), using screen ratios.",
+            exc,
+        )
+    finally:
+        if capture is not None:
+            try:
+                capture.close()
+            except Exception:
+                pass
+
+    local_rect = Rect(
+        x=rect.x - ox,
+        y=rect.y - oy,
+        w=rect.w,
+        h=rect.h,
+    )
+    return rect_to_normalized(local_rect, w, h)

@@ -31,7 +31,7 @@ def test_load_default_config():
     assert config.translator.backend == "llama_cpp"
     assert config.ocr.backend == "paddleocr"
     assert config.window.capture_backend == "mss"
-    assert config.v2_mirror.render_mode == "mask-text"
+    assert config.v2_mirror.render_mode == "inpaint-text"
 
 
 def test_cli_override_mode():

@@ -152,6 +152,10 @@ class MainWindow(QMainWindow):
         self.mode_combo.addItems(["v1-overlay", "v2-mirror"])
         form.addRow("Operation Mode", self.mode_combo)
 
+        self.render_mode_combo = QComboBox()
+        self.render_mode_combo.addItems(["mask-text", "inpaint-text", "ai-text-edit"])
+        form.addRow("Render Mode", self.render_mode_combo)
+
         self.translator_combo = QComboBox()
         self.translator_combo.addItems(["llama-cpp", "deepl"])
         form.addRow("Translation Backend", self.translator_combo)
@@ -208,6 +212,8 @@ class MainWindow(QMainWindow):
 
         # Connect change signals for quick config inputs
         self.mode_combo.currentTextChanged.connect(self._save_quick_config)
+        self.mode_combo.currentTextChanged.connect(self._update_ui_state)
+        self.render_mode_combo.currentTextChanged.connect(self._save_quick_config)
         self.translator_combo.currentTextChanged.connect(self._save_quick_config)
         self.target_lang_input.editingFinished.connect(self._save_quick_config)
 
@@ -257,6 +263,7 @@ class MainWindow(QMainWindow):
                 
             # Block signals so we don't save back while loading
             self.mode_combo.blockSignals(True)
+            self.render_mode_combo.blockSignals(True)
             self.translator_combo.blockSignals(True)
             self.target_lang_input.blockSignals(True)
 
@@ -265,6 +272,12 @@ class MainWindow(QMainWindow):
             index = self.mode_combo.findText(mode)
             if index >= 0:
                 self.mode_combo.setCurrentIndex(index)
+                
+            # Set render mode combobox
+            rmode = config.v2_mirror.render_mode or "inpaint-text"
+            index = self.render_mode_combo.findText(rmode)
+            if index >= 0:
+                self.render_mode_combo.setCurrentIndex(index)
                 
             # Set translator combobox
             translator = config.translator.backend or "llama_cpp"
@@ -279,6 +292,7 @@ class MainWindow(QMainWindow):
             print(f"[yaku] Failed to load config into UI: {exc}")
         finally:
             self.mode_combo.blockSignals(False)
+            self.render_mode_combo.blockSignals(False)
             self.translator_combo.blockSignals(False)
             self.target_lang_input.blockSignals(False)
 
@@ -288,6 +302,7 @@ class MainWindow(QMainWindow):
         try:
             config, config_path = resolve_profile(self.profile or "default")
             config.app.mode = self.mode_combo.currentText()  # type: ignore[assignment]
+            config.v2_mirror.render_mode = self.render_mode_combo.currentText()  # type: ignore[assignment]
             backend_val = self.translator_combo.currentText()
             config.translator.backend = "llama_cpp" if backend_val == "llama-cpp" else "deepl"  # type: ignore[assignment]
             config.app.target_lang = self.target_lang_input.text().strip() or "en"
@@ -305,6 +320,7 @@ class MainWindow(QMainWindow):
 
     def _update_ui_state(self) -> None:
         is_running = self._run_process is not None and self._run_process.poll() is None
+        is_v2 = self.mode_combo.currentText() == "v2-mirror"
         
         if is_running:
             self.status_badge.setText("RUNNING")
@@ -316,6 +332,7 @@ class MainWindow(QMainWindow):
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.mode_combo.setEnabled(False)
+            self.render_mode_combo.setEnabled(False)
             self.translator_combo.setEnabled(False)
             self.target_lang_input.setEnabled(False)
         else:
@@ -328,6 +345,7 @@ class MainWindow(QMainWindow):
             self.btn_start.setEnabled(True)
             self.btn_stop.setEnabled(False)
             self.mode_combo.setEnabled(True)
+            self.render_mode_combo.setEnabled(is_v2)
             self.translator_combo.setEnabled(True)
             self.target_lang_input.setEnabled(True)
 
@@ -418,7 +436,8 @@ class MainWindow(QMainWindow):
                 app = QApplication.instance()
                 if app is not None:
                     geom = app.primaryScreen().geometry()
-                    norm = rect_to_normalized(rect, geom.width(), geom.height())
+                    from yaku.core.capture import normalize_screen_rect_to_window
+                    norm = normalize_screen_rect_to_window(rect, config.window, geom.width(), geom.height())
                     update_replacement_region(config, norm)
                     save_config(config, config_path)
         finally:
@@ -429,17 +448,25 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Yaku", "Yaku is already running.")
             return
             
-        self._run_process = self._run_command(
-            [
-                "--mode",
-                self.mode_combo.currentText(),
-                "--translator",
-                self.translator_combo.currentText(),
-                "--target-lang",
-                self.target_lang_input.text().strip() or "en",
-                "--run",
-            ]
-        )
+        args = [
+            "--mode",
+            self.mode_combo.currentText(),
+            "--translator",
+            self.translator_combo.currentText(),
+            "--target-lang",
+            self.target_lang_input.text().strip() or "en",
+        ]
+        if self.mode_combo.currentText() == "v2-mirror":
+            args.extend(["--render-mode", self.render_mode_combo.currentText()])
+            
+        from yaku.core.profiles import resolve_profile
+        config, _ = resolve_profile(self.profile or "default")
+        if config.app.debug:
+            args.append("--debug")
+            
+        args.append("--run")
+        
+        self._run_process = self._run_command(args)
         if self._run_process is not None:
             self.process_timer.start()
             self._update_ui_state()

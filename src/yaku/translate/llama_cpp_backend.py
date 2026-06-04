@@ -157,6 +157,16 @@ class LlamaCppTranslator(BaseTranslator):
                 f"Unexpected llama.cpp response structure: {data}"
             ) from exc
 
+        usage = data.get("usage") or {}
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+
+        verbose_timings = data.get("__verbose", {})
+        tokens_per_second = None
+        if isinstance(verbose_timings, dict):
+            timings = verbose_timings.get("timings") or {}
+            tokens_per_second = timings.get("predicted_per_second")
+
         return TranslationResult(
             source_text=text,
             translated_text=_strip_response(raw_text),
@@ -164,6 +174,10 @@ class LlamaCppTranslator(BaseTranslator):
             backend="llama_cpp",
             backend_model=self._model,
             raw=data,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            tokens_per_second=tokens_per_second,
+            base_url=self._base_url,
         )
 
     def close(self) -> None:

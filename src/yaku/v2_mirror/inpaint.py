@@ -113,6 +113,20 @@ class OpenCVInpainter(BaseInpainter):
 
 
 # ---------------------------------------------------------------------------
+# Lama backend placeholder
+# ---------------------------------------------------------------------------
+
+class LamaInpainter(BaseInpainter):
+    """Placeholder inpainter for a future LaMa (Resolution-robust Large Mask Inpainting) backend."""
+
+    def __init__(self, config: InpaintConfig) -> None:
+        self._config = config
+
+    def inpaint(self, image: Image.Image, mask: Image.Image) -> Image.Image:
+        raise NotImplementedError("LaMa inpainter is not implemented yet")
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -124,7 +138,9 @@ def create_inpainter(config: InpaintConfig) -> BaseInpainter:
     """
     if config.backend == "opencv":
         return OpenCVInpainter(method=config.method, radius=config.radius)
+    if config.backend == "lama":
+        return LamaInpainter(config)
 
     raise InvalidBackendError(
-        f"Unknown inpaint backend: '{config.backend}'. Valid choices: opencv"
+        f"Unknown inpaint backend: '{config.backend}'. Valid choices: opencv, lama"
     )

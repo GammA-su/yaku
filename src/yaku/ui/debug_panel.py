@@ -108,12 +108,15 @@ class DebugPanel(QWidget):
         ocr_ms: Optional[float] = None,
         trans_ms: Optional[float] = None,
         error: str = "",
+        tokens_per_second: Optional[float] = None,
     ) -> None:
         """Refresh all fields from the latest pipeline result."""
         self._ocr_raw.setText(ocr_raw or "-")
         self._ocr_clean.setText(ocr_clean or "-")
         self._translation.setText(translation or "-")
         model_str = f"{backend}" + (f"/{backend_model}" if backend_model else "")
+        if tokens_per_second is not None:
+            model_str += f" ({tokens_per_second:.1f} tok/s)"
         self._backend.setText(model_str or "-")
         self._cached.setText("yes" if cached else "no")
         self._ocr_ms.setText(f"{ocr_ms:.1f}" if ocr_ms is not None else "-")

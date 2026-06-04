@@ -182,6 +182,7 @@ class OverlayController(QObject):
                 ),
                 ocr_ms=result.ocr_ms,
                 trans_ms=result.translation_ms,
+                tokens_per_second=result.tokens_per_second,
             )
             self._push_metrics()
 

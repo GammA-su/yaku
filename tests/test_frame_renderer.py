@@ -90,3 +90,40 @@ def test_render_does_not_mutate_input(config):
     original = np.asarray(frame).copy()
     FrameRenderer(config).render(frame, "do not mutate the source frame")
     assert np.array_equal(np.asarray(frame), original)
+
+
+def test_render_cache_hit_still_renders_text():
+    config = V2MirrorConfig(render_mode="mask-text")
+    # Separate regions: replacement_region is in upper half, text_region is in lower half
+    config.replacement_region.x_ratio = 0.1
+    config.replacement_region.y_ratio = 0.1
+    config.replacement_region.w_ratio = 0.8
+    config.replacement_region.h_ratio = 0.2
+
+    config.text_region.x_ratio = 0.1
+    config.text_region.y_ratio = 0.7
+    config.text_region.w_ratio = 0.8
+    config.text_region.h_ratio = 0.2
+
+    renderer = FrameRenderer(config)
+    frame = _gray_frame(w=100, h=100)
+
+    # First render (cache miss)
+    out1 = renderer.render(frame, "Hello")
+
+    # Second render with same frame (cache hit on background)
+    # The text should still be rendered in the text region
+    out2 = renderer.render(frame, "Hello")
+
+    # Verify the text region contains text (i.e. is not identical to base frame)
+    arr_frame = np.asarray(frame)
+    arr_out2 = np.asarray(out2)
+    # Lower half (y=70 to 90) should contain the drawn text
+    assert not np.array_equal(arr_frame[70:90, 10:90], arr_out2[70:90, 10:90])
+
+    # Third render with same frame but different text (cache hit on background)
+    # The text region should change to reflect the new text
+    out3 = renderer.render(frame, "World")
+    arr_out3 = np.asarray(out3)
+    assert not np.array_equal(arr_out2[70:90, 10:90], arr_out3[70:90, 10:90])
+

@@ -16,31 +16,40 @@ glossary:
   - note: Use affectionate tone.
     source: お兄ちゃん
     target: big brother
+metrics:
+  enabled: true
+  include_text_preview: true
+  log_jsonl: true
+  log_path: out/metrics/yaku_latency.jsonl
+  preview_chars: 80
+  slow_event_ms: 1500
 ocr:
   backend: paddleocr
   hash_threshold: 0
   min_chars: 1
   region:
-    h: 152
-    w: 724
-    x: 644
-    y: 864
+    h: 267
+    w: 723
+    x: 290
+    y: 638
 translator:
   backend: llama_cpp
   context_lines: 3
   deepl:
+    api_key: null
     api_key_env: DEEPL_API_KEY
     formality: default
     target_lang: EN-US
     use_context: true
   llama_cpp:
+    api_key_env: longapikey
     base_url: http://127.0.0.1:8080/v1
+    disable_reasoning: true
     max_tokens: 256
     model: qwen-local
+    port: 8080
     temperature: 0.2
     use_hosted: true
-    api_key_env: longapikey
-    disable_reasoning: true
 v1_overlay:
   background_opacity: 0.55
   click_through: true
@@ -72,18 +81,41 @@ v2_mirror:
     backend: opencv
     debug_draw_mask: false
     fallback_to_mask_text: true
-    mask_padding: 6
+    mask_padding: 4
     method: telea
     radius: 3
   input_focus_mode: send_input_only
   preserve_aspect_ratio: true
-  render_mode: mask-text
+  render_mode: inpaint-text
+  render_text:
+    auto_fit: true
+    fallback_fill:
+    - 255
+    - 255
+    - 255
+    fallback_stroke:
+    - 0
+    - 0
+    - 0
+    font_family: Noto Sans
+    font_path: null
+    font_size: null
+    line_spacing: 1.15
+    max_font_size: 42
+    min_font_size: 14
+    sample_style_from_source: true
+    stroke_width: 2
   replacement_region:
-    h_ratio: 0.5236111111111111
-    w_ratio: 0.4984375
-    x_ratio: 0.155859375
-    y_ratio: 0.19583333333333333
+    h_ratio: 0.2
+    w_ratio: 0.84
+    x_ratio: 0.08
+    y_ratio: 0.72
+  text_region:
+    h_ratio: 0.14
+    w_ratio: 0.76
+    x_ratio: 0.12
+    y_ratio: 0.76
 window:
   capture_backend: mss
-  hwnd: 724194
+  hwnd: 1772238
   title_contains: IsekaiBrideHunting

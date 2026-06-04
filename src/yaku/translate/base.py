@@ -25,6 +25,11 @@ class TranslationResult:
     translation_ms: float | None = None
     raw: dict | None = None
     metrics: object | None = None  # PipelineMetrics (avoids an import cycle)
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    tokens_per_second: float | None = None
+    base_url: str | None = None
+
 
 
 # ---------------------------------------------------------------------------

@@ -198,6 +198,23 @@ on a hard failure.
 
 ---
 
+## V2 visual replacement mode
+
+Yaku V2 visual text replacement mode allows playing Visual Novels with the original Japanese dialogue visually replaced by translated text (English/French/etc.) rendered in-place within the dialogue box.
+
+### Features
+- **Deterministic Text rendering (Default):** Instead of using a text-to-image generative model which can introduce spelling errors and hallucinations, Yaku uses a hybrid approach:
+  1. Japanese text is automatically removed from the dialogue region.
+  2. The exact English translation is rendered deterministically using Pillow and FreeType.
+- **Render Modes:**
+  - `inpaint-text` (Default): Uses OpenCV's fast, localized inpainting algorithms (`Telea` or `Navier-Stokes`) to clean the Japanese text box area, then draws exact translations. If inpainting fails, it degrades gracefully to `mask-text`.
+  - `mask-text`: Draws a semi-transparent background box over the original text region to cover it before rendering the translation. Fast, lightweight, and requires no optional packages.
+  - `ai-text-edit` (Experimental): An interface for external AnyText2/FLUX-Text style backends to perform style-aligned local edits. Kept disabled by default.
+- **Style Sampling:** When `sample_style_from_source` is enabled, Yaku adaptively inspects the color palette and stroke outlines of the original Japanese dialogue and attempts to match them for the English/French rendering.
+- **Fast Display Loop:** Dialogue frames are cached based on the crop's hash, meaning visual rendering does not cause interface stuttering or lag.
+
+---
+
 ## Logs
 
 Logs are written to `out/yaku.log` (rotating, 5 MB x 2 backups) and the console.
@@ -240,6 +257,50 @@ Use Yaku only with games you have legally obtained, and respect each game's
 license terms, EULA, and the translation/redistribution rights of its
 publishers. Yaku is a personal accessibility/translation aid; do not use it to
 redistribute copyrighted text or to violate a game's terms of service.
+
+## Benchmarking OCR and translation speed
+
+Yaku includes CLI tools to benchmark translation performance and latency across different backends (DeepL, llama.cpp, etc.).
+
+### 1. Run Benchmarks
+
+Use `yaku-bench-translate` to run repeatable translation tests on a dataset of lines:
+
+**DeepL:**
+```powershell
+$env:DEEPL_API_KEY="..."
+uv run yaku-bench-translate --input benchmarks/vn_lines_ja.txt --translator deepl --target-lang EN-US --repeat 3 --out out/benchmarks/deepl.jsonl
+```
+
+**Remote Qwen 27B:**
+```powershell
+$env:YAKU_REMOTE_LLM_KEY="..."
+uv run yaku-bench-translate --input benchmarks/vn_lines_ja.txt --translator llama-cpp --base-url https://llm.iosys.fr/v1 --api-key-env YAKU_REMOTE_LLM_KEY --model qwen-local --target-lang en --repeat 3 --out out/benchmarks/qwen27b_remote.jsonl
+```
+
+**Local Qwen 9B:**
+```powershell
+uv run yaku-bench-translate --input benchmarks/vn_lines_ja.txt --translator llama-cpp --base-url http://127.0.0.1:8089/v1 --model qwen9b --target-lang en --repeat 3 --out out/benchmarks/qwen9b_local.jsonl
+```
+
+### 2. View Statistical Summary
+
+Use `yaku-bench-summary` to analyze the logged latencies and token/character rates:
+
+```powershell
+uv run yaku-bench-summary out/benchmarks/deepl.jsonl
+uv run yaku-bench-summary out/benchmarks/qwen27b_remote.jsonl
+```
+
+### 3. Normal App Latency Logs
+
+During standard V1/V2 execution, latency events are automatically written to `out/metrics/yaku_latency.jsonl` when metrics logging is enabled.
+
+To run the app with debug logs:
+```powershell
+uv run yaku --mode v1-overlay --translator llama-cpp --target-lang en --run --debug
+```
+Then inspect `out/metrics/yaku_latency.jsonl` for a detailed breakdown of capture, hash, OCR, translation, rendering, and token rate timings.
 
 ---
 

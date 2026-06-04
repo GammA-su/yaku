@@ -108,9 +108,30 @@ class ReplacementRegion(BaseModel):
     h_ratio: float = 0.20
 
 
+class TextRegion(BaseModel):
+    x_ratio: float = 0.12
+    y_ratio: float = 0.76
+    w_ratio: float = 0.76
+    h_ratio: float = 0.14
+
+
+class RenderTextConfig(BaseModel):
+    font_path: Optional[str] = None
+    font_family: str = "Noto Sans"
+    font_size: Optional[int] = None
+    auto_fit: bool = True
+    min_font_size: int = 14
+    max_font_size: int = 42
+    line_spacing: float = 1.15
+    stroke_width: int = 2
+    sample_style_from_source: bool = True
+    fallback_fill: list[int] = Field(default_factory=lambda: [255, 255, 255])
+    fallback_stroke: list[int] = Field(default_factory=lambda: [0, 0, 0])
+
+
 class InpaintConfig(BaseModel):
     backend: str = "opencv"
-    mask_padding: int = 6
+    mask_padding: int = 4
     method: Literal["telea", "ns"] = "telea"
     radius: int = 3
     fallback_to_mask_text: bool = True
@@ -134,9 +155,21 @@ class V2MirrorConfig(BaseModel):
         "send_input_only", "focus_then_send", "disabled"
     ] = "send_input_only"
     replacement_region: ReplacementRegion = Field(default_factory=ReplacementRegion)
-    render_mode: Literal["mask-text", "inpaint-text", "ai-text-edit"] = "mask-text"
+    text_region: TextRegion = Field(default_factory=TextRegion)
+    render_mode: Literal["mask-text", "inpaint-text", "ai-text-edit"] = "inpaint-text"
     inpaint: InpaintConfig = Field(default_factory=InpaintConfig)
+    render_text: RenderTextConfig = Field(default_factory=RenderTextConfig)
     ai_text_edit: AITextEditConfig = Field(default_factory=AITextEditConfig)
+
+
+
+class MetricsConfig(BaseModel):
+    enabled: bool = True
+    log_jsonl: bool = True
+    log_path: str = "out/metrics/yaku_latency.jsonl"
+    include_text_preview: bool = True
+    preview_chars: int = 80
+    slow_event_ms: int = 1500
 
 
 class CacheConfig(BaseModel):
@@ -154,6 +187,8 @@ class YakuConfig(BaseModel):
     v2_mirror: V2MirrorConfig = Field(default_factory=V2MirrorConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     glossary: GlossaryConfig = Field(default_factory=GlossaryConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal, py
 
 from yaku.core.config import YakuConfig
 from yaku.core.logging import get_logger
+from yaku.core.metrics import MetricsLogger
 from yaku.core.pipeline import V2Pipeline
 from yaku.translate.base import TranslationResult
 from yaku.v2_mirror.frame_renderer import FrameRenderer
@@ -40,18 +41,19 @@ class _Signals(QObject):
 class _PipelineJob(QRunnable):
     """Single V2 pipeline tick over a captured frame."""
 
-    def __init__(self, pipeline: V2Pipeline, frame: Image.Image, signals: _Signals) -> None:
+    def __init__(self, pipeline: V2Pipeline, frame: Image.Image, signals: _Signals, capture_ms: float = 0.0) -> None:
         super().__init__()
         self.setAutoDelete(True)
         self._pipeline = pipeline
         self._frame = frame
         self._signals = signals
+        self._capture_ms = capture_ms
 
     @pyqtSlot()
     def run(self) -> None:
         # Error boundary: never let a worker exception escape the thread pool.
         try:
-            result = self._pipeline.tick(self._frame)
+            result = self._pipeline.tick(self._frame, capture_ms=self._capture_ms)
             self._signals.result.emit(result)
         except Exception as exc:  # noqa: BLE001
             _log.exception("Mirror pipeline worker error")
@@ -106,6 +108,12 @@ class MirrorController(QObject):
         # Most recent forwarded-input diagnostic: (description, mapped, success).
         self._last_input: tuple[str, object, Optional[bool]] = ("none", None, None)
 
+        self._metrics_logger = MetricsLogger(
+            path=config.metrics.log_path,
+            enabled=config.metrics.enabled and config.metrics.log_jsonl,
+        )
+        self._tick_started_time = 0.0
+
         window.set_input_forwarder(forwarder, config.v2_mirror.forward_input)
         window.hotkey_f8.connect(self._handle_force_ocr)
         window.hotkey_f9.connect(self._handle_toggle_pause)
@@ -141,7 +149,9 @@ class MirrorController(QObject):
     def _on_tick(self) -> None:
         if self._stopped:
             return
+        started = time.perf_counter()
         frame = self._capture_frame()
+        capture_ms = (time.perf_counter() - started) * 1000.0
         if frame is None:
             return
         self._current_frame = frame
@@ -150,7 +160,8 @@ class MirrorController(QObject):
         # No-duplicate-jobs guard: only one OCR/translate job in flight at a time.
         if not self._paused and not self._busy:
             self._busy = True
-            self._executor(_PipelineJob(self._pipeline, frame.copy(), self._signals))
+            self._tick_started_time = started
+            self._executor(_PipelineJob(self._pipeline, frame.copy(), self._signals, capture_ms=capture_ms))
 
     def _capture_frame(self) -> Optional[Image.Image]:
         # Capture error boundary: a failure here must not kill the display loop.
@@ -205,6 +216,13 @@ class MirrorController(QObject):
         if result.metrics is not None:
             result.metrics.render_ms = self._last_render_ms  # type: ignore[attr-defined]
 
+        # Log LatencyEvent if attached
+        latency_event = getattr(result, "latency_event", None)
+        if latency_event is not None:
+            latency_event.render_ms = self._last_render_ms
+            latency_event.total_ms = (time.perf_counter() - self._tick_started_time) * 1000.0
+            self._metrics_logger.log_event(latency_event)
+
         if self._debug_panel is not None:
             self._debug_panel.update_result(  # type: ignore[attr-defined]
                 ocr_clean=result.source_text,
@@ -215,6 +233,7 @@ class MirrorController(QObject):
                 ocr_raw=result.raw_source_text,
                 ocr_ms=result.ocr_ms,
                 trans_ms=result.translation_ms,
+                tokens_per_second=result.tokens_per_second,
             )
             self._push_metrics()
 

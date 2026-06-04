@@ -6,8 +6,14 @@ the debug panel and the benchmark script.
 """
 from __future__ import annotations
 
+import json
+import re
+import threading
+import time
 from collections import deque
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, asdict
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Deque, Optional
 
 _MS_FIELDS = ("capture_ms", "hash_ms", "ocr_ms", "translate_ms", "render_ms")
@@ -114,3 +120,79 @@ class MetricsTracker:
             f"cache_hit={a['cache_hit_rate'] * 100:.0f}% "
             f"errors={a['errors_count']} n={a['samples']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Telemetry event components
+# ---------------------------------------------------------------------------
+
+class StageTimer:
+    """Context manager for measuring execution time in milliseconds."""
+
+    def __init__(self) -> None:
+        self.elapsed_ms: Optional[float] = None
+        self._start: Optional[float] = None
+
+    def __enter__(self) -> StageTimer:
+        self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if self._start is not None:
+            self.elapsed_ms = (time.perf_counter() - self._start) * 1000.0
+
+
+@dataclass
+class LatencyEvent:
+    """Telemetry payload for a single pipeline step/OCR/translation attempt."""
+
+    ts: str
+    mode: str
+    ocr_backend: str | None
+    translator: str | None
+    model: str | None
+    base_url: str | None
+    render_mode: str | None
+    capture_ms: float | None
+    hash_ms: float | None
+    ocr_ms: float | None
+    translate_ms: float | None
+    render_ms: float | None
+    total_ms: float | None
+    cache_hit: bool
+    source_chars: int
+    translated_chars: int
+    source_preview: str | None
+    translation_preview: str | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    tokens_per_second: float | None
+    error: str | None
+
+
+class MetricsLogger:
+    """Thread-safe JSONL logger for latency events."""
+
+    def __init__(self, path: str | Path, enabled: bool = True) -> None:
+        self.path = Path(path)
+        self.enabled = enabled
+        self._lock = threading.Lock()
+
+    def log_event(self, event: LatencyEvent) -> None:
+        if not self.enabled:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            event_dict = asdict(event)
+
+            # Sanitize potential inline credentials in base_url
+            if event_dict.get("base_url"):
+                event_dict["base_url"] = re.sub(r"(key|token|auth)=[^&]+", r"\1=[REDACTED]", event_dict["base_url"])
+
+            line = json.dumps(event_dict, ensure_ascii=False) + "\n"
+            with self._lock:
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(line)
+        except Exception as exc:
+            import sys
+            print(f"Warning: failed to write to metrics log: {exc}", file=sys.stderr)

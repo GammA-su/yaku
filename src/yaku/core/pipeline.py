@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import time
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TYPE_CHECKING, Optional, Sequence
 
@@ -16,7 +17,7 @@ from yaku.core.errors import CaptureError, OCRError, TranslationError
 from yaku.core.hash_gate import HashGate
 from yaku.core.image_utils import Rect, clamp_rect, crop_pil
 from yaku.core.logging import get_logger
-from yaku.core.metrics import MetricsTracker, PipelineMetrics
+from yaku.core.metrics import MetricsTracker, PipelineMetrics, StageTimer, MetricsLogger, LatencyEvent
 from yaku.core.text_cleanup import cleanup_ocr_text
 from yaku.ocr.base import BaseOCR
 from yaku.translate.base import BaseTranslator, TranslationResult
@@ -114,6 +115,67 @@ def translate_with_cache(
     return result
 
 
+def _build_latency_event(
+    config: YakuConfig,
+    translator: BaseTranslator,
+    mode: str,
+    capture_ms: float | None,
+    hash_ms: float | None,
+    ocr_ms: float | None,
+    translate_ms: float | None,
+    render_ms: float | None,
+    total_ms: float | None,
+    cache_hit: bool,
+    source_chars: int,
+    translated_chars: int,
+    source_text: str | None,
+    translated_text: str | None,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    tokens_per_second: float | None,
+    error: str | None,
+) -> LatencyEvent:
+    source_preview = None
+    translation_preview = None
+    if config.metrics.include_text_preview:
+        limit = config.metrics.preview_chars
+        if source_text:
+            source_preview = source_text[:limit]
+        if translated_text:
+            translation_preview = translated_text[:limit]
+
+    model = translator.backend_model
+    base_url = getattr(translator, "_base_url", None)
+
+    ts = datetime.now().astimezone().isoformat()
+
+    return LatencyEvent(
+        ts=ts,
+        mode=mode,
+        ocr_backend=config.ocr.backend,
+        translator=config.translator.backend,
+        model=model,
+        base_url=base_url,
+        render_mode=config.v2_mirror.render_mode if mode == "v2-mirror" else None,
+        capture_ms=capture_ms,
+        hash_ms=hash_ms,
+        ocr_ms=ocr_ms,
+        translate_ms=translate_ms,
+        render_ms=render_ms,
+        total_ms=total_ms,
+        cache_hit=cache_hit,
+        source_chars=source_chars,
+        translated_chars=translated_chars,
+        source_preview=source_preview,
+        translation_preview=translation_preview,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        tokens_per_second=tokens_per_second,
+        error=error,
+    )
+
+
+
 # ---------------------------------------------------------------------------
 # V1 pipeline — pure Python, no Qt
 # ---------------------------------------------------------------------------
@@ -147,6 +209,14 @@ class V1Pipeline:
         self._force: bool = False
         self._bypass_cache_next: bool = False
         self._metrics = MetricsTracker()
+        self._metrics_logger = MetricsLogger(
+            path=config.metrics.log_path,
+            enabled=config.metrics.enabled and config.metrics.log_jsonl,
+        )
+
+    def _log_latency(self, **kwargs) -> None:
+        event = _build_latency_event(self._config, self._translator, **kwargs)
+        self._metrics_logger.log_event(event)
 
     # ------------------------------------------------------------------
     # Public control
@@ -207,6 +277,7 @@ class V1Pipeline:
             frame was identical to the last one or the OCR produced the same
             text.
         """
+        overall_start = time.perf_counter()
         force = self._force
         bypass_cache = self._bypass_cache_next
         self._force = False
@@ -214,6 +285,7 @@ class V1Pipeline:
         metrics = PipelineMetrics()
 
         # ── 1. capture ────────────────────────────────────────────────
+        capture_timer = StageTimer()
         if image is None:
             if self._capture is None:
                 return None
@@ -223,46 +295,153 @@ class V1Pipeline:
                 w=self._config.ocr.region.w,
                 h=self._config.ocr.region.h,
             )
-            started = time.perf_counter()
-            try:
-                if region.w > 0 and region.h > 0:
-                    image = self._capture.capture_region(region)
-                else:
-                    image = self._capture.capture_frame()
-            except Exception as exc:  # noqa: BLE001 — report as a typed error
-                self._metrics.record_error()
-                raise CaptureError(f"capture failed: {exc}") from exc
-            metrics.capture_ms = (time.perf_counter() - started) * 1000.0
+            with capture_timer:
+                try:
+                    if region.w > 0 and region.h > 0:
+                        image = self._capture.capture_region(region)
+                    else:
+                        image = self._capture.capture_frame()
+                except Exception as exc:  # noqa: BLE001 — report as a typed error
+                    self._metrics.record_error()
+                    raise CaptureError(f"capture failed: {exc}") from exc
+            metrics.capture_ms = capture_timer.elapsed_ms or 0.0
+        else:
+            metrics.capture_ms = 0.0
 
         # ── 2. hash gate ───────────────────────────────────────────────
-        started = time.perf_counter()
-        proceed = self._hash_gate.should_process(image, force=force)
-        metrics.hash_ms = (time.perf_counter() - started) * 1000.0
+        hash_timer = StageTimer()
+        with hash_timer:
+            proceed = self._hash_gate.should_process(image, force=force)
+        metrics.hash_ms = hash_timer.elapsed_ms or 0.0
         if not proceed:
             return None
 
         # ── 3. OCR ────────────────────────────────────────────────────
-        started = time.perf_counter()
-        try:
-            ocr_result = self._ocr.recognize(image)
-        except Exception as exc:  # noqa: BLE001
-            self._metrics.record_error()
-            raise OCRError(f"OCR failed: {exc}") from exc
-        metrics.ocr_ms = (time.perf_counter() - started) * 1000.0
+        ocr_timer = StageTimer()
+        ocr_result = None
+        ocr_error = None
+        with ocr_timer:
+            try:
+                ocr_result = self._ocr.recognize(image)
+            except Exception as exc:  # noqa: BLE001
+                ocr_error = exc
+                self._metrics.record_error()
+        metrics.ocr_ms = ocr_timer.elapsed_ms or 0.0
+
+        if ocr_error is not None:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0
+            self._log_latency(
+                mode="v1-overlay",
+                capture_ms=metrics.capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=0,
+                translated_chars=0,
+                source_text="",
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error=f"OCR failed: {ocr_error}",
+            )
+            raise OCRError(f"OCR failed: {ocr_error}") from ocr_error
+
         source = cleanup_ocr_text(ocr_result.text)
         _record_ocr_debug_image(image, ocr_result.text, source)
         _log.debug("ocr raw=%r clean=%r crop=%sx%s", ocr_result.text, source, image.width, image.height)
 
         if not source:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0
+            self._log_latency(
+                mode="v1-overlay",
+                capture_ms=metrics.capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=0,
+                translated_chars=0,
+                source_text="",
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error="empty_ocr",
+            )
             return None
+
         if not _is_meaningful_ocr_text(source):
             _log.debug("ignoring punctuation-only OCR text: %r", source)
+            total_ms = (time.perf_counter() - overall_start) * 1000.0
+            self._log_latency(
+                mode="v1-overlay",
+                capture_ms=metrics.capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=len(source),
+                translated_chars=0,
+                source_text=source,
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error="punctuation_only",
+            )
             return None
+
         if len(source.strip()) < self._config.ocr.min_chars:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0
+            self._log_latency(
+                mode="v1-overlay",
+                capture_ms=metrics.capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=len(source),
+                translated_chars=0,
+                source_text=source,
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error="too_short",
+            )
             return None
 
         # ── 4. text dedup ──────────────────────────────────────────────
         if source == self._last_source:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0
+            self._log_latency(
+                mode="v1-overlay",
+                capture_ms=metrics.capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=len(source),
+                translated_chars=0,
+                source_text=source,
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error="duplicate_text",
+            )
             return None
         self._last_source = source
 
@@ -270,25 +449,53 @@ class V1Pipeline:
         context = self._context.previous_translation_lines(
             self._config.translator.context_lines
         )
-        try:
-            result = translate_with_cache(
-                self._cache,
-                self._translator,
-                source,
-                context,
-                self._config.app.target_lang,
-                bypass_cache=bypass_cache,
-                glossary=(
-                    self._config.glossary.entries
-                    if self._config.glossary.enabled
-                    else None
-                ),
+        translate_timer = StageTimer()
+        result = None
+        trans_error = None
+        with translate_timer:
+            try:
+                result = translate_with_cache(
+                    self._cache,
+                    self._translator,
+                    source,
+                    context,
+                    self._config.app.target_lang,
+                    bypass_cache=bypass_cache,
+                    glossary=(
+                        self._config.glossary.entries
+                        if self._config.glossary.enabled
+                        else None
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                trans_error = exc
+                self._metrics.record_error()
+                # Allow retranslation on the next tick rather than sticking dedup'd.
+                self._last_source = ""
+
+        metrics.translate_ms = translate_timer.elapsed_ms or 0.0
+
+        if trans_error is not None:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0
+            self._log_latency(
+                mode="v1-overlay",
+                capture_ms=metrics.capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=metrics.translate_ms,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=len(source),
+                translated_chars=0,
+                source_text=source,
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error=f"Translation failed: {trans_error}",
             )
-        except Exception as exc:  # noqa: BLE001
-            self._metrics.record_error()
-            # Allow retranslation on the next tick rather than sticking dedup'd.
-            self._last_source = ""
-            raise TranslationError(f"translation failed: {exc}") from exc
+            raise TranslationError(f"translation failed: {trans_error}") from trans_error
 
         result.raw_source_text = ocr_result.text
         result.ocr_ms = metrics.ocr_ms
@@ -304,6 +511,27 @@ class V1Pipeline:
             result.translated_text,
             suppress_window=self._config.v1_overlay.duplicate_suppression_window,
         )
+
+        total_ms = (time.perf_counter() - overall_start) * 1000.0
+        self._log_latency(
+            mode="v1-overlay",
+            capture_ms=metrics.capture_ms,
+            hash_ms=metrics.hash_ms,
+            ocr_ms=metrics.ocr_ms,
+            translate_ms=metrics.translate_ms,
+            render_ms=None,
+            total_ms=total_ms,
+            cache_hit=result.cached,
+            source_chars=len(source),
+            translated_chars=len(result.translated_text),
+            source_text=source,
+            translated_text=result.translated_text,
+            prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
+            tokens_per_second=result.tokens_per_second,
+            error=None,
+        )
+
         _log.info(
             "tick ocr_ms=%.1f translation_ms=%.1f backend=%s cache_hit=%s source_len=%d",
             result.ocr_ms or 0.0,
@@ -338,17 +566,30 @@ class V2Pipeline:
         translator: BaseTranslator,
         cache: YakuCache,
         config: YakuConfig,
+        capture: Optional[BaseCapture] = None,
     ) -> None:
         self._ocr = ocr
         self._translator = translator
         self._cache = cache
         self._config = config
+        self._capture = capture
         self._hash_gate = HashGate(threshold=config.ocr.hash_threshold)
         self._context = ContextMemory(max_lines=config.translator.context_lines)
         self._last_source: str = ""
         self._force: bool = False
         self._bypass_cache_next: bool = False
         self._metrics = MetricsTracker()
+        self._metrics_logger = MetricsLogger(
+            path=config.metrics.log_path,
+            enabled=config.metrics.enabled and config.metrics.log_jsonl,
+        )
+
+    def _log_latency(self, **kwargs) -> None:
+        event = _build_latency_event(self._config, self._translator, **kwargs)
+        self._metrics_logger.log_event(event)
+
+    def _build_latency_event(self, **kwargs) -> LatencyEvent:
+        return _build_latency_event(self._config, self._translator, **kwargs)
 
     # ------------------------------------------------------------------
     # Public control
@@ -364,6 +605,9 @@ class V2Pipeline:
         self._bypass_cache_next = bypass_cache
         self._hash_gate.reset()
         self._last_source = ""
+
+    def update_capture(self, capture: Optional[BaseCapture]) -> None:
+        self._capture = capture
 
     def update_translator(self, translator: BaseTranslator) -> None:
         old = self._translator
@@ -389,20 +633,37 @@ class V2Pipeline:
             w=self._config.ocr.region.w,
             h=self._config.ocr.region.h,
         )
+        _log.debug("V2Pipeline _ocr_crop input region: %s", region)
         if region.w <= 0 or region.h <= 0:
             return frame
+
+        # Translate absolute screen coordinates to target-window local coordinates
+        if self._capture is not None:
+            ox, oy = self._capture.source_origin()
+            region = Rect(
+                x=region.x - ox,
+                y=region.y - oy,
+                w=region.w,
+                h=region.h,
+            )
+            _log.debug("V2Pipeline _ocr_crop window-local region after offset (ox=%s, oy=%s): %s", ox, oy, region)
+        else:
+            _log.debug("V2Pipeline _ocr_crop self._capture is None, using absolute coordinates")
+
         clamped = clamp_rect(region, frame.width, frame.height)
+        _log.debug("V2Pipeline _ocr_crop clamped rect (frame=%sx%s): %s", frame.width, frame.height, clamped)
         if clamped.w <= 0 or clamped.h <= 0:
             return frame
         return crop_pil(frame, clamped)
 
-    def tick(self, frame: Optional[Image.Image]) -> Optional[TranslationResult]:
+    def tick(self, frame: Optional[Image.Image], capture_ms: float = 0.0) -> Optional[TranslationResult]:
         """Run one OCR → translate cycle over the OCR region of *frame*.
 
         Returns a :class:`TranslationResult` when the region changed and a
         translation was produced, otherwise ``None`` (unchanged frame, empty
         OCR, or duplicate text).
         """
+        overall_start = time.perf_counter()
         if frame is None:
             return None
 
@@ -411,39 +672,145 @@ class V2Pipeline:
         self._force = False
         self._bypass_cache_next = False
         metrics = PipelineMetrics()
+        metrics.capture_ms = capture_ms
 
         # ── 1. crop OCR region ────────────────────────────────────────
         crop = self._ocr_crop(frame)
 
         # ── 2. hash gate ──────────────────────────────────────────────
-        started = time.perf_counter()
-        proceed = self._hash_gate.should_process(crop, force=force)
-        metrics.hash_ms = (time.perf_counter() - started) * 1000.0
+        hash_timer = StageTimer()
+        with hash_timer:
+            proceed = self._hash_gate.should_process(crop, force=force)
+        metrics.hash_ms = hash_timer.elapsed_ms or 0.0
         if not proceed:
             return None
 
         # ── 3. OCR ────────────────────────────────────────────────────
-        started = time.perf_counter()
-        try:
-            ocr_result = self._ocr.recognize(crop)
-        except Exception as exc:  # noqa: BLE001
-            self._metrics.record_error()
-            raise OCRError(f"OCR failed: {exc}") from exc
-        metrics.ocr_ms = (time.perf_counter() - started) * 1000.0
+        ocr_timer = StageTimer()
+        ocr_result = None
+        ocr_error = None
+        with ocr_timer:
+            try:
+                ocr_result = self._ocr.recognize(crop)
+            except Exception as exc:  # noqa: BLE001
+                ocr_error = exc
+                self._metrics.record_error()
+        metrics.ocr_ms = ocr_timer.elapsed_ms or 0.0
+
+        if ocr_error is not None:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0 + capture_ms
+            self._log_latency(
+                mode="v2-mirror",
+                capture_ms=capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=0,
+                translated_chars=0,
+                source_text="",
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error=f"OCR failed: {ocr_error}",
+            )
+            raise OCRError(f"OCR failed: {ocr_error}") from ocr_error
+
         source = cleanup_ocr_text(ocr_result.text)
         _record_ocr_debug_image(crop, ocr_result.text, source)
         _log.debug("v2 ocr raw=%r clean=%r crop=%sx%s", ocr_result.text, source, crop.width, crop.height)
 
         if not source:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0 + capture_ms
+            self._log_latency(
+                mode="v2-mirror",
+                capture_ms=capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=0,
+                translated_chars=0,
+                source_text="",
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error="empty_ocr",
+            )
             return None
+
         if not _is_meaningful_ocr_text(source):
             _log.debug("ignoring punctuation-only OCR text: %r", source)
+            total_ms = (time.perf_counter() - overall_start) * 1000.0 + capture_ms
+            self._log_latency(
+                mode="v2-mirror",
+                capture_ms=capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=len(source),
+                translated_chars=0,
+                source_text=source,
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error="punctuation_only",
+            )
             return None
+
         if len(source.strip()) < self._config.ocr.min_chars:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0 + capture_ms
+            self._log_latency(
+                mode="v2-mirror",
+                capture_ms=capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=len(source),
+                translated_chars=0,
+                source_text=source,
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error="too_short",
+            )
             return None
 
         # ── 4. text dedup ─────────────────────────────────────────────
         if source == self._last_source:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0 + capture_ms
+            self._log_latency(
+                mode="v2-mirror",
+                capture_ms=capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=None,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=len(source),
+                translated_chars=0,
+                source_text=source,
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error="duplicate_text",
+            )
             return None
         self._last_source = source
 
@@ -451,24 +818,52 @@ class V2Pipeline:
         context = self._context.previous_translation_lines(
             self._config.translator.context_lines
         )
-        try:
-            result = translate_with_cache(
-                self._cache,
-                self._translator,
-                source,
-                context,
-                self._config.app.target_lang,
-                bypass_cache=bypass_cache,
-                glossary=(
-                    self._config.glossary.entries
-                    if self._config.glossary.enabled
-                    else None
-                ),
+        translate_timer = StageTimer()
+        result = None
+        trans_error = None
+        with translate_timer:
+            try:
+                result = translate_with_cache(
+                    self._cache,
+                    self._translator,
+                    source,
+                    context,
+                    self._config.app.target_lang,
+                    bypass_cache=bypass_cache,
+                    glossary=(
+                        self._config.glossary.entries
+                        if self._config.glossary.enabled
+                        else None
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                trans_error = exc
+                self._metrics.record_error()
+                self._last_source = ""
+
+        metrics.translate_ms = translate_timer.elapsed_ms or 0.0
+
+        if trans_error is not None:
+            total_ms = (time.perf_counter() - overall_start) * 1000.0 + capture_ms
+            self._log_latency(
+                mode="v2-mirror",
+                capture_ms=capture_ms,
+                hash_ms=metrics.hash_ms,
+                ocr_ms=metrics.ocr_ms,
+                translate_ms=metrics.translate_ms,
+                render_ms=None,
+                total_ms=total_ms,
+                cache_hit=False,
+                source_chars=len(source),
+                translated_chars=0,
+                source_text=source,
+                translated_text="",
+                prompt_tokens=None,
+                completion_tokens=None,
+                tokens_per_second=None,
+                error=f"Translation failed: {trans_error}",
             )
-        except Exception as exc:  # noqa: BLE001
-            self._metrics.record_error()
-            self._last_source = ""
-            raise TranslationError(f"translation failed: {exc}") from exc
+            raise TranslationError(f"translation failed: {trans_error}") from trans_error
 
         result.raw_source_text = ocr_result.text
         result.ocr_ms = metrics.ocr_ms
@@ -484,6 +879,27 @@ class V2Pipeline:
             result.translated_text,
             suppress_window=self._config.v1_overlay.duplicate_suppression_window,
         )
+
+        # Attach latency event telemetry payload to the result to log after rendering
+        result.latency_event = self._build_latency_event(
+            mode="v2-mirror",
+            capture_ms=capture_ms,
+            hash_ms=metrics.hash_ms,
+            ocr_ms=metrics.ocr_ms,
+            translate_ms=metrics.translate_ms,
+            render_ms=None,
+            total_ms=None,
+            cache_hit=result.cached,
+            source_chars=len(source),
+            translated_chars=len(result.translated_text),
+            source_text=source,
+            translated_text=result.translated_text,
+            prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
+            tokens_per_second=result.tokens_per_second,
+            error=None,
+        )
+
         _log.info(
             "v2 tick ocr_ms=%.1f translation_ms=%.1f backend=%s cache_hit=%s source_len=%d",
             result.ocr_ms or 0.0,

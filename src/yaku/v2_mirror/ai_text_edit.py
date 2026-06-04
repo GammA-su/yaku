@@ -39,7 +39,18 @@ def _to_png_bytes(image: Image.Image) -> bytes:
 class BaseAITextEditor(ABC):
     """Edits the masked region of a frame to render *target_text* natively."""
 
-    @abstractmethod
+    def edit(
+        self,
+        image: Image.Image,
+        mask: Image.Image,
+        target_text: str,
+        style_hint: Optional[dict] = None,
+    ) -> Image.Image:
+        """Return a new frame with the masked region edited to show *target_text*."""
+        if type(self).edit_text is not BaseAITextEditor.edit_text:
+            return self.edit_text(image, mask, target_text, style_hint)
+        raise NotImplementedError("Subclass must implement edit or edit_text")
+
     def edit_text(
         self,
         image: Image.Image,
@@ -47,12 +58,12 @@ class BaseAITextEditor(ABC):
         target_text: str,
         style_hint: Optional[dict] = None,
     ) -> Image.Image:
-        """Return a new frame with the masked region edited to show *target_text*.
+        """Return a new frame with the masked region edited to show *target_text*."""
+        if type(self).edit is not BaseAITextEditor.edit:
+            return self.edit(image, mask, target_text, style_hint)
+        raise NotImplementedError("Subclass must implement edit or edit_text")
 
-        The result must be the same size as *image* (callers may resize
-        defensively).  Implementations raise :class:`AITextEditError` on any
-        failure so the renderer can fall back.
-        """
+
 
     def close(self) -> None:
         """Release any held resources (HTTP clients, model handles, …)."""
@@ -72,7 +83,7 @@ class DisabledAITextEditor(BaseAITextEditor):
     def __init__(self, reason: str = "AI text editing is disabled") -> None:
         self._reason = reason
 
-    def edit_text(
+    def edit(
         self,
         image: Image.Image,
         mask: Image.Image,
@@ -80,6 +91,7 @@ class DisabledAITextEditor(BaseAITextEditor):
         style_hint: Optional[dict] = None,
     ) -> Image.Image:
         raise AITextEditError(self._reason)
+
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +127,7 @@ class ExternalHTTPAITextEditor(BaseAITextEditor):
         self._endpoint = endpoint
         self._client = httpx.Client(timeout=timeout_sec, transport=_transport)
 
-    def edit_text(
+    def edit(
         self,
         image: Image.Image,
         mask: Image.Image,

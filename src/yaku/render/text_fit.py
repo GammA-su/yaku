@@ -165,3 +165,58 @@ def fit_wrapped_text(
         font_size=best_size,
         line_height=_line_height(font, line_spacing),
     )
+
+
+def wrap_text_to_box(text: str, font, box_w: int) -> list[str]:
+    """Wrap *text* to *box_w* pixels under *font*. Matches wrap_text_to_width."""
+    return wrap_text_to_width(text, font, box_w)
+
+
+def fit_font_to_box(
+    text: str,
+    font_path_or_family: str | None,
+    box_w: int,
+    box_h: int,
+    min_size: int = 14,
+    max_size: int = 42,
+    line_spacing: float = 1.15,
+) -> FittedText:
+    """Find the largest font size (min_size to max_size) for font_path_or_family where text fits in box."""
+    from yaku.render.font_match import find_font
+    from PIL import ImageFont
+
+    _FONT_CANDIDATES = (
+        "arial.ttf",
+        "DejaVuSans.ttf",
+        "Arial.ttf",
+        "segoeui.ttf",
+    )
+
+    def load_font_at_size(size: int) -> AnyFont:
+        if font_path_or_family:
+            path = find_font(font_path_or_family, size)
+            if path is not None:
+                try:
+                    return ImageFont.truetype(str(path), size)
+                except Exception:
+                    pass
+        for name in _FONT_CANDIDATES:
+            try:
+                return ImageFont.truetype(name, size)
+            except OSError:
+                continue
+        try:
+            return ImageFont.load_default(size=size)
+        except TypeError:
+            return ImageFont.load_default()
+
+    return fit_wrapped_text(
+        text,
+        box_w,
+        box_h,
+        load_font_at_size,
+        min_size=min_size,
+        max_size=max_size,
+        line_spacing=line_spacing,
+    )
+

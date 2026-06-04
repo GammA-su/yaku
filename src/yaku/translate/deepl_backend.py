@@ -95,6 +95,7 @@ class DeepLTranslator(BaseTranslator):
             translated_text=translated,
             target_lang=target_lang,
             backend="deepl",
+            base_url=_TRANSLATE_URL,
             raw=data,
         )
 

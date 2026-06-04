@@ -41,6 +41,8 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 yaku = "yaku.main:main"
+yaku-bench-translate = "yaku.bench.translate_bench:main"
+yaku-bench-summary = "yaku.bench.summary:main"
 
 [build-system]
 requires = ["hatchling"]

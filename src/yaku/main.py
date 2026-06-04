@@ -243,7 +243,7 @@ def _cmd_run_v2(config, config_path: Path) -> int:
         main_logger.exception("Capture backend unavailable.")
 
     # --- Pipeline + renderer ---
-    pipeline = V2Pipeline(ocr, translator, cache, config)
+    pipeline = V2Pipeline(ocr, translator, cache, config, capture=capture)
     renderer = FrameRenderer(config.v2_mirror, cache=cache)
 
     # --- Input forwarder ---
@@ -333,7 +333,9 @@ def _cmd_select_replacement_region(config, config_path: Path) -> int:
 
     app = QApplication.instance()
     geom = app.primaryScreen().geometry()
-    norm = rect_to_normalized(rect, geom.width(), geom.height())
+    
+    from yaku.core.capture import normalize_screen_rect_to_window
+    norm = normalize_screen_rect_to_window(rect, config.window, geom.width(), geom.height())
 
     update_replacement_region(config, norm)
     save_config(config, config_path)

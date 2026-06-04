@@ -128,14 +128,13 @@ def run_setup_wizard(
     )
     config.translator.backend = "llama_cpp" if translator == "llama-cpp" else "deepl"
 
-    # 6. replacement region (v2 only) --------------------------------------
     if mode == "v2-mirror" and select_regions:
         print_fn("\n6) Draw the V2 text replacement region (drag, Enter to confirm)...")
         rect = _select_region(print_fn)
         if rect is not None and app is not None:
             geom = app.primaryScreen().geometry()
-            from yaku.core.image_utils import rect_to_normalized
-            norm = rect_to_normalized(rect, geom.width(), geom.height())
+            from yaku.core.capture import normalize_screen_rect_to_window
+            norm = normalize_screen_rect_to_window(rect, config.window, geom.width(), geom.height())
             update_replacement_region(config, norm)
             print_fn(
                 f"   Replacement region: "

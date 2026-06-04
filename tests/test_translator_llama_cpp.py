@@ -293,3 +293,29 @@ def test_hosted_llm_unauthorized_raises_401():
         translator.translate("text", [], "en")
     assert "401" in str(exc_info.value)
     assert "Unauthorized key" in str(exc_info.value)
+
+
+def test_timings_and_usage_parsed():
+    # Mock llama.cpp response containing token usage and timing metadata
+    response_data = {
+        "choices": [
+            {"message": {"role": "assistant", "content": "Hello"}}
+        ],
+        "usage": {
+            "prompt_tokens": 15,
+            "completion_tokens": 25
+        },
+        "__verbose": {
+            "timings": {
+                "predicted_per_second": 45.2
+            }
+        }
+    }
+    
+    transport = _CapturingTransport(httpx.Response(200, json=response_data))
+    translator = _make_translator(transport)
+    result = translator.translate("こんにちは", [], "en")
+    
+    assert result.prompt_tokens == 15
+    assert result.completion_tokens == 25
+    assert result.tokens_per_second == 45.2

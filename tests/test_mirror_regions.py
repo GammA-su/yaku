@@ -159,3 +159,42 @@ def test_ocr_region_crop_used(cache, config):
     result = pipe.tick(_noise(7))
     assert result is not None
     assert result.translated_text == "X"
+
+
+def test_ocr_region_crop_shifted_by_capture_origin(cache, config):
+    class MockCapture:
+        def source_origin(self) -> tuple[int, int]:
+            return (5, 8)
+
+    config.ocr.region.x = 15
+    config.ocr.region.y = 18
+    config.ocr.region.w = 20
+    config.ocr.region.h = 20
+
+    # The region translated should be:
+    # x = 15 - 5 = 10
+    # y = 18 - 8 = 10
+    # w = 20, h = 20
+    # So if we pass a 50x50 image, the cropped image size should be exactly 20x20
+    # and it should crop the region starting at (10, 10).
+    pipe = V2Pipeline(
+        ocr=DummyOCR("X"),
+        translator=_CountingTranslator("Y"),
+        cache=cache,
+        config=config,
+        capture=MockCapture(),  # type: ignore
+    )
+
+    cropped_images = []
+    class RecordingOCR(DummyOCR):
+        def recognize(self, image: Image.Image):
+            cropped_images.append(image)
+            return super().recognize(image)
+
+    pipe._ocr = RecordingOCR("X")
+    pipe.tick(_noise(seed=10, size=50))
+
+    assert len(cropped_images) == 1
+    cropped = cropped_images[0]
+    assert cropped.size == (20, 20)
+
