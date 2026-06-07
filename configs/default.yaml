@@ -3,6 +3,32 @@ app:
   mode: v1-overlay
   target_lang: en
   tick_ms: 300
+audio:
+  auto_install_prompt: true
+  backend: kotoba_whisper
+  chunk_seconds: 7.0
+  vad_threshold: 0.3
+  min_speech_ms: 350
+  min_silence_ms: 450
+  merge_speech_gap_ms: 900
+  vad_tail_ms: 350
+  compute_type: auto
+  dedupe_window: 5
+  device: auto
+  device_id: 0
+  device_name: Default Device
+  download_models: true
+  enabled: true
+  install_state: auto
+  language: ja
+  local_model_path: null
+  min_transcript_chars: 2
+  model: kotoba-tech/kotoba-whisper-v2.0-faster
+  model_cache_dir: models/asr
+  optional_dependencies_group: audio
+  sample_rate: 16000
+  source: auto
+  vad_enabled: true
 cache:
   cache_edited_frames: true
   cache_translations: true
@@ -67,13 +93,83 @@ v1_overlay:
   w: 900
   x: 100
   y: 700
+v1_overlay_max:
+  enabled: true
+  scan_scope: window
+  scan_interval_ms: 1500
+  hash_threshold: 6
+  max_regions: 30
+  min_text_chars: 1
+  japanese_only: true
+  translate_individual_regions: true
+  merge_nearby_boxes: true
+  merge_distance_px: 16
+  require_ocr_boxes: true
+  force_paddleocr_warning: true
+  overlay:
+    font_family: Arial
+    font_size: 13
+    max_width: 260
+    padding: 6
+    opacity: 0.82
+    background: [0, 0, 0]
+    foreground: [255, 255, 255]
+    anchor: right
+    avoid_offscreen: true
+    show_source_in_debug: true
+  cache:
+    enabled: true
+v4_yomitan:
+  enabled: true
+  region:
+    x: 0
+    y: 0
+    w: 800
+    h: 300
+    is_set: false
+  scan_scope: region
+  scan_interval_ms: 1000
+  hash_threshold: 6
+  ocr_backend_required: paddleocr
+  japanese_only: true
+  tokenizer: simple
+  hover_trigger: none
+  lookup_on_hover: true
+  lookup_on_click: true
+  max_hover_results: 8
+  dictionaries:
+    enabled: true
+    dictionary_dir: dictionaries
+    index_path: out/yomitan_index.sqlite3
+    auto_import_on_start: true
+    imported_manifest_path: out/yomitan_imported.json
+    max_glossary_items: 6
+  popup:
+    font_family: Arial
+    font_size: 14
+    max_width: 520
+    max_height: 420
+    opacity: 0.95
+    show_reading: true
+    show_frequency: true
+    show_pitch: true
+    show_tags: true
+    show_source_sentence: true
+    show_dictionary_name: true
+  debug:
+    save_ocr_region: false
+    debug_dir: out/debug/v4_yomitan
 v2_mirror:
   ai_text_edit:
+    allow_resize_output: true
     backend: external_http
+    debug_dir: out/debug/ai_text_edit
     deterministic_text_after_ai: true
-    enabled: false
-    endpoint: http://127.0.0.1:7860
+    enabled: true
+    endpoint: http://127.0.0.1:7861/edit
     fallback: inpaint-text
+    save_debug_payloads: true
+    send_style_hint: true
     timeout_sec: 30
   forward_input: true
   fullscreen: false

@@ -17,7 +17,19 @@ class OCRResult:
     raw: Any = None
 
 
-class BaseOCR(ABC):
+@dataclass
+class OCRBox:
+    text: str
+    box: tuple[int, int, int, int]  # x, y, w, h in captured image coordinates
+    confidence: float | None = None
+
+
+class OCRBackend(ABC):
+    def detect_text_boxes(self, image: Image.Image) -> list[OCRBox]:
+        raise NotImplementedError("This OCR backend does not support bounding box detection.")
+
+
+class BaseOCR(OCRBackend, ABC):
     """All OCR backends implement this interface."""
 
     @abstractmethod

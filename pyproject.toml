@@ -35,6 +35,15 @@ ocr-manga = [
 ocr-paddle = [
     "paddleocr>=2.7",
 ]
+audio = [
+    "sounddevice>=0.4.6",
+    "numpy>=1.24.0",
+    "faster-whisper>=1.0.0",
+    "silero-vad>=5.1.2",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "huggingface-hub",
+]
 
 [dependency-groups]
 dev = ["pytest>=8.0"]

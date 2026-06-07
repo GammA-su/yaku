@@ -225,5 +225,112 @@ def test_accept_ai_text_when_deterministic_false():
 
     assert editor.calls == 1
     # AI output is accepted verbatim (no deterministic redraw).
-    raw_ai = np.full((360, 640, 3), (10, 20, 30), dtype=np.uint8)
-    assert np.array_equal(np.asarray(out), raw_ai)
+    rect = _region(cfg, frame)
+    expected = frame.copy()
+    expected.paste(Image.new("RGB", (rect.w, rect.h), (10, 20, 30)), (rect.x, rect.y))
+    assert np.array_equal(np.asarray(out), np.asarray(expected))
+
+
+def test_external_http_payload():
+    import json
+    import httpx
+
+    captured_request = {}
+
+    def handler(request):
+        captured_request["content"] = request.content
+        captured_request["headers"] = request.headers
+        buf = io.BytesIO()
+        Image.new("RGB", (100, 100), (0, 0, 0)).save(buf, format="PNG")
+        return httpx.Response(200, content=buf.getvalue(), headers={"content-type": "image/png"})
+
+    transport = httpx.MockTransport(handler)
+    editor = ExternalHTTPAITextEditor(
+        "http://test.local/edit",
+        timeout_sec=5.0,
+        send_style_hint=True,
+        allow_resize_output=True,
+        _transport=transport,
+    )
+
+    style_hint = {"font_size": 20, "fill_rgb": [255, 255, 255]}
+    out = editor.edit_text(_gray(640, 360), Image.new("L", (640, 360)), "hello", style_hint=style_hint)
+    
+    assert out.size == (640, 360)
+    assert b"target_text" in captured_request["content"]
+    assert b"hello" in captured_request["content"]
+    assert b"style_hint" in captured_request["content"]
+    assert b"font_size" in captured_request["content"]
+    assert b"image.png" in captured_request["content"]
+    assert b"mask.png" in captured_request["content"]
+
+    captured_request.clear()
+    editor_no_style = ExternalHTTPAITextEditor(
+        "http://test.local/edit",
+        timeout_sec=5.0,
+        send_style_hint=False,
+        allow_resize_output=True,
+        _transport=transport,
+    )
+    editor_no_style.edit_text(_gray(640, 360), Image.new("L", (640, 360)), "hello", style_hint=style_hint)
+    assert b"style_hint" not in captured_request["content"]
+
+
+def test_external_http_failures():
+    import httpx
+
+    def handler_timeout(request):
+        raise httpx.TimeoutException("mock timeout")
+    
+    editor = ExternalHTTPAITextEditor("http://test.local/edit", _transport=httpx.MockTransport(handler_timeout))
+    with pytest.raises(AITextEditError) as exc:
+        editor.edit_text(_gray(), Image.new("L", (640, 360)), "hello")
+    assert "timeout" in str(exc.value).lower()
+
+    def handler_network(request):
+        raise httpx.RequestError("mock network error")
+
+    editor = ExternalHTTPAITextEditor("http://test.local/edit", _transport=httpx.MockTransport(handler_network))
+    with pytest.raises(AITextEditError) as exc:
+        editor.edit_text(_gray(), Image.new("L", (640, 360)), "hello")
+    assert "network" in str(exc.value).lower()
+
+    def handler_valid(request):
+        buf = io.BytesIO()
+        Image.new("RGB", (100, 100), (0, 0, 0)).save(buf, format="PNG")
+        return httpx.Response(200, content=buf.getvalue(), headers={"content-type": "image/png"})
+
+    editor_no_resize = ExternalHTTPAITextEditor(
+        "http://test.local/edit",
+        allow_resize_output=False,
+        _transport=httpx.MockTransport(handler_valid)
+    )
+    with pytest.raises(AITextEditError) as exc:
+        editor_no_resize.edit_text(_gray(640, 360), Image.new("L", (640, 360)), "hello")
+    assert "size" in str(exc.value).lower()
+
+
+def test_renderer_preserves_size_and_writes_debug_payloads(tmp_path):
+    import json
+    frame = _gray(640, 360)
+    cfg = _ai_config(
+        enabled=True,
+        save_debug_payloads=True,
+        debug_dir=str(tmp_path),
+        deterministic_text_after_ai=False,
+    )
+    editor = _SolidEditor(fill=(10, 20, 30))
+    renderer = FrameRenderer(cfg, ai_editor=editor)
+    out = renderer.render(frame, "Hello")
+    
+    assert out.size == frame.size
+    
+    assert (tmp_path / "last_image.png").exists()
+    assert (tmp_path / "last_mask.png").exists()
+    assert (tmp_path / "last_style_hint.json").exists()
+    assert (tmp_path / "last_output.png").exists()
+
+    with open(tmp_path / "last_style_hint.json", encoding="utf-8") as f:
+        sh = json.load(f)
+        assert "box" in sh
+        assert "target_lang" in sh

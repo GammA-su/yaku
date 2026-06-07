@@ -22,6 +22,9 @@ _STATUS_STYLE: dict[str, str] = {
     "cached":       "#44ccff",
     "paused":       "#ff9933",
     "error":        "#ff5555",
+    "listening":    "#88cc88",
+    "transcribing": "#cc88ff",
+    "translating":  "#ffcc44",
 }
 
 

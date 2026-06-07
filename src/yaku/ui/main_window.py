@@ -144,24 +144,46 @@ class MainWindow(QMainWindow):
 
         # Right Column: Quick Config
         config_group = QGroupBox("Quick Configuration")
-        form = QFormLayout(config_group)
-        form.setSpacing(12)
-        form.setContentsMargins(16, 20, 16, 16)
+        self.quick_form = QFormLayout(config_group)
+        self.quick_form.setSpacing(12)
+        self.quick_form.setContentsMargins(16, 20, 16, 16)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["v1-overlay", "v2-mirror"])
-        form.addRow("Operation Mode", self.mode_combo)
+        self.mode_combo.addItems(["v1-overlay", "v2-mirror", "v3-audio-overlay", "V1 Overlay Max - Full Window UI Translation", "V4 Yomitan Native Dictionary", "V1 Overlay + Yomitan Native Dictionary"])
+        self.quick_form.addRow("Operation Mode", self.mode_combo)
+
+        from PyQt6.QtWidgets import QSpinBox
+        self.scan_interval_spin = QSpinBox()
+        self.scan_interval_spin.setRange(50, 10000)
+        self.scan_interval_spin.setSingleStep(100)
+        self.scan_interval_spin.setSuffix(" ms")
+        self.quick_form.addRow("Scan Interval", self.scan_interval_spin)
+
+        self.max_regions_spin = QSpinBox()
+        self.max_regions_spin.setRange(1, 100)
+        self.quick_form.addRow("Max Regions", self.max_regions_spin)
+
+        self.gui_ocr_warning = QLabel("Warning: v1-overlay-max requires PaddleOCR.")
+        self.gui_ocr_warning.setStyleSheet("color: #ff5555; font-weight: bold; font-size: 10px;")
+        self.quick_form.addRow("", self.gui_ocr_warning)
 
         self.render_mode_combo = QComboBox()
         self.render_mode_combo.addItems(["mask-text", "inpaint-text", "ai-text-edit"])
-        form.addRow("Render Mode", self.render_mode_combo)
+        self.quick_form.addRow("Render Mode", self.render_mode_combo)
+
+        self.audio_source_combo = QComboBox()
+        self.audio_source_combo.addItems(["auto", "loopback", "mic"])
+        self.quick_form.addRow("Audio Source", self.audio_source_combo)
+
+        self.audio_backend_label = QLabel("Kotoba Whisper")
+        self.quick_form.addRow("Audio Backend", self.audio_backend_label)
 
         self.translator_combo = QComboBox()
         self.translator_combo.addItems(["llama-cpp", "deepl"])
-        form.addRow("Translation Backend", self.translator_combo)
+        self.quick_form.addRow("Translation Backend", self.translator_combo)
 
         self.target_lang_input = QLineEdit("en")
-        form.addRow("Target Language", self.target_lang_input)
+        self.quick_form.addRow("Target Language", self.target_lang_input)
 
         cols_layout.addWidget(config_group, 6)
         main_layout.addLayout(cols_layout)
@@ -196,6 +218,14 @@ class MainWindow(QMainWindow):
         self.btn_logs.clicked.connect(self._show_logs)
         utils_grid.addWidget(self.btn_logs, 1, 2)
 
+        self.btn_yomitan_region = QPushButton("Draw Yomitan Area")
+        self.btn_yomitan_region.clicked.connect(self._select_yomitan_region)
+        utils_grid.addWidget(self.btn_yomitan_region, 2, 0)
+
+        self.btn_yomitan_dicts = QPushButton("Yomitan Dictionaries")
+        self.btn_yomitan_dicts.clicked.connect(self._open_yomitan_dicts)
+        utils_grid.addWidget(self.btn_yomitan_dicts, 2, 1)
+
         main_layout.addWidget(utils_group)
 
         # QTimer for monitoring the background process
@@ -214,8 +244,11 @@ class MainWindow(QMainWindow):
         self.mode_combo.currentTextChanged.connect(self._save_quick_config)
         self.mode_combo.currentTextChanged.connect(self._update_ui_state)
         self.render_mode_combo.currentTextChanged.connect(self._save_quick_config)
+        self.audio_source_combo.currentTextChanged.connect(self._save_quick_config)
         self.translator_combo.currentTextChanged.connect(self._save_quick_config)
         self.target_lang_input.editingFinished.connect(self._save_quick_config)
+        self.scan_interval_spin.valueChanged.connect(self._save_quick_config)
+        self.max_regions_spin.valueChanged.connect(self._save_quick_config)
 
         self._update_ui_state()
 
@@ -264,12 +297,23 @@ class MainWindow(QMainWindow):
             # Block signals so we don't save back while loading
             self.mode_combo.blockSignals(True)
             self.render_mode_combo.blockSignals(True)
+            self.audio_source_combo.blockSignals(True)
             self.translator_combo.blockSignals(True)
             self.target_lang_input.blockSignals(True)
+            self.scan_interval_spin.blockSignals(True)
+            self.max_regions_spin.blockSignals(True)
 
             # Set mode combobox
             mode = config.app.mode or "v1-overlay"
-            index = self.mode_combo.findText(mode)
+            if mode == "v1-overlay-max":
+                combo_text = "V1 Overlay Max - Full Window UI Translation"
+            elif mode == "v4-yomitan":
+                combo_text = "V4 Yomitan Native Dictionary"
+            elif mode == "v1-yomitan":
+                combo_text = "V1 Overlay + Yomitan Native Dictionary"
+            else:
+                combo_text = mode
+            index = self.mode_combo.findText(combo_text)
             if index >= 0:
                 self.mode_combo.setCurrentIndex(index)
                 
@@ -278,6 +322,12 @@ class MainWindow(QMainWindow):
             index = self.render_mode_combo.findText(rmode)
             if index >= 0:
                 self.render_mode_combo.setCurrentIndex(index)
+
+            # Set audio source combobox
+            asource = config.audio.source or "auto"
+            index = self.audio_source_combo.findText(asource)
+            if index >= 0:
+                self.audio_source_combo.setCurrentIndex(index)
                 
             # Set translator combobox
             translator = config.translator.backend or "llama_cpp"
@@ -288,24 +338,46 @@ class MainWindow(QMainWindow):
                 
             # Set target language
             self.target_lang_input.setText(config.app.target_lang or "en")
+
+            # Set scan interval and max regions
+            self.scan_interval_spin.setValue(config.v1_overlay_max.scan_interval_ms)
+            self.max_regions_spin.setValue(config.v1_overlay_max.max_regions)
         except Exception as exc:  # noqa: BLE001
             print(f"[yaku] Failed to load config into UI: {exc}")
         finally:
             self.mode_combo.blockSignals(False)
             self.render_mode_combo.blockSignals(False)
+            self.audio_source_combo.blockSignals(False)
             self.translator_combo.blockSignals(False)
             self.target_lang_input.blockSignals(False)
+            self.scan_interval_spin.blockSignals(False)
+            self.max_regions_spin.blockSignals(False)
 
     def _save_quick_config(self) -> None:
         from yaku.core.config import save_config
         from yaku.core.profiles import resolve_profile
         try:
             config, config_path = resolve_profile(self.profile or "default")
-            config.app.mode = self.mode_combo.currentText()  # type: ignore[assignment]
+            
+            combo_text = self.mode_combo.currentText()
+            if combo_text == "V1 Overlay Max - Full Window UI Translation":
+                config.app.mode = "v1-overlay-max"
+            elif combo_text == "V4 Yomitan Native Dictionary":
+                config.app.mode = "v4-yomitan"
+            elif combo_text == "V1 Overlay + Yomitan Native Dictionary":
+                config.app.mode = "v1-yomitan"
+            else:
+                config.app.mode = combo_text  # type: ignore[assignment]
+                
             config.v2_mirror.render_mode = self.render_mode_combo.currentText()  # type: ignore[assignment]
+            config.audio.source = self.audio_source_combo.currentText()  # type: ignore[assignment]
             backend_val = self.translator_combo.currentText()
             config.translator.backend = "llama_cpp" if backend_val == "llama-cpp" else "deepl"  # type: ignore[assignment]
             config.app.target_lang = self.target_lang_input.text().strip() or "en"
+            
+            config.v1_overlay_max.scan_interval_ms = self.scan_interval_spin.value()
+            config.v1_overlay_max.max_regions = self.max_regions_spin.value()
+            
             save_config(config, config_path)
         except Exception as exc:  # noqa: BLE001
             print(f"[yaku] Failed to save quick config: {exc}")
@@ -320,7 +392,65 @@ class MainWindow(QMainWindow):
 
     def _update_ui_state(self) -> None:
         is_running = self._run_process is not None and self._run_process.poll() is None
-        is_v2 = self.mode_combo.currentText() == "v2-mirror"
+        mode = self.mode_combo.currentText()
+        is_max = mode == "V1 Overlay Max - Full Window UI Translation"
+        is_v2 = mode == "v2-mirror"
+        is_v3 = mode == "v3-audio-overlay"
+        is_yomitan = mode == "V4 Yomitan Native Dictionary"
+
+        render_mode_label = self.quick_form.labelForField(self.render_mode_combo)
+        if render_mode_label:
+            render_mode_label.setVisible(is_v2)
+        self.render_mode_combo.setVisible(is_v2)
+
+        audio_source_label = self.quick_form.labelForField(self.audio_source_combo)
+        if audio_source_label:
+            audio_source_label.setVisible(is_v3)
+        self.audio_source_combo.setVisible(is_v3)
+
+        audio_backend_label = self.quick_form.labelForField(self.audio_backend_label)
+        if audio_backend_label:
+            audio_backend_label.setVisible(is_v3)
+        self.audio_backend_label.setVisible(is_v3)
+
+        translator_label = self.quick_form.labelForField(self.translator_combo)
+        if translator_label:
+            translator_label.setVisible(not is_yomitan and not is_v3)
+        self.translator_combo.setVisible(not is_yomitan and not is_v3)
+
+        target_lang_label = self.quick_form.labelForField(self.target_lang_input)
+        if target_lang_label:
+            target_lang_label.setVisible(not is_yomitan and not is_v3)
+        self.target_lang_input.setVisible(not is_yomitan and not is_v3)
+
+        scan_interval_label = self.quick_form.labelForField(self.scan_interval_spin)
+        if scan_interval_label:
+            scan_interval_label.setVisible(is_max)
+        self.scan_interval_spin.setVisible(is_max)
+
+        max_regions_label = self.quick_form.labelForField(self.max_regions_spin)
+        if max_regions_label:
+            max_regions_label.setVisible(is_max)
+        self.max_regions_spin.setVisible(is_max)
+
+        # ocr warning visibility
+        ocr_backend = "paddleocr"
+        try:
+            from yaku.core.profiles import resolve_profile
+            config, _ = resolve_profile(self.profile or "default")
+            ocr_backend = config.ocr.backend
+        except Exception:
+            pass
+
+        warning_visible = is_max and ocr_backend != "paddleocr"
+        warning_label = self.quick_form.labelForField(self.gui_ocr_warning)
+        if warning_label:
+            warning_label.setVisible(warning_visible)
+        self.gui_ocr_warning.setVisible(warning_visible)
+
+        self.btn_ocr.setEnabled(not is_v3 and not is_max and not is_yomitan)
+        self.btn_replacement.setEnabled(is_v2)
+        self.btn_picker.setEnabled(not is_v3)
         
         if is_running:
             self.status_badge.setText("RUNNING")
@@ -333,8 +463,15 @@ class MainWindow(QMainWindow):
             self.btn_stop.setEnabled(True)
             self.mode_combo.setEnabled(False)
             self.render_mode_combo.setEnabled(False)
+            self.audio_source_combo.setEnabled(False)
             self.translator_combo.setEnabled(False)
             self.target_lang_input.setEnabled(False)
+            self.scan_interval_spin.setEnabled(False)
+            self.max_regions_spin.setEnabled(False)
+            
+            if hasattr(self, "btn_yomitan_region"):
+                self.btn_yomitan_region.setEnabled(False)
+                self.btn_yomitan_dicts.setEnabled(False)
         else:
             self.status_badge.setText("STOPPED")
             self.status_badge.setStyleSheet(
@@ -346,8 +483,15 @@ class MainWindow(QMainWindow):
             self.btn_stop.setEnabled(False)
             self.mode_combo.setEnabled(True)
             self.render_mode_combo.setEnabled(is_v2)
-            self.translator_combo.setEnabled(True)
-            self.target_lang_input.setEnabled(True)
+            self.audio_source_combo.setEnabled(is_v3)
+            self.translator_combo.setEnabled(not is_yomitan)
+            self.target_lang_input.setEnabled(not is_yomitan)
+            self.scan_interval_spin.setEnabled(is_max)
+            self.max_regions_spin.setEnabled(is_max)
+            
+            if hasattr(self, "btn_yomitan_region"):
+                self.btn_yomitan_region.setEnabled(is_yomitan)
+                self.btn_yomitan_dicts.setEnabled(True)
 
     def _monitor_process(self) -> None:
         if self._run_process is not None:
@@ -448,16 +592,48 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Yaku", "Yaku is already running.")
             return
             
+        mode_val = self.mode_combo.currentText()
+        if mode_val == "V1 Overlay Max - Full Window UI Translation":
+            mode_arg = "v1-overlay-max"
+        elif mode_val == "V4 Yomitan Native Dictionary":
+            mode_arg = "v4-yomitan"
+        elif mode_val == "V1 Overlay + Yomitan Native Dictionary":
+            mode_arg = "v1-yomitan"
+        else:
+            mode_arg = mode_val
+            
         args = [
             "--mode",
-            self.mode_combo.currentText(),
-            "--translator",
-            self.translator_combo.currentText(),
-            "--target-lang",
-            self.target_lang_input.text().strip() or "en",
+            mode_arg,
         ]
+        if mode_arg != "v4-yomitan":
+            args.extend([
+                "--translator",
+                self.translator_combo.currentText(),
+                "--target-lang",
+                self.target_lang_input.text().strip() or "en",
+            ])
+            
         if self.mode_combo.currentText() == "v2-mirror":
             args.extend(["--render-mode", self.render_mode_combo.currentText()])
+        elif self.mode_combo.currentText() == "v3-audio-overlay":
+            args.extend(["--audio-source", self.audio_source_combo.currentText()])
+            
+            from yaku.audio.deps import check_audio_dependencies
+            from yaku.audio.model_manager import check_model_available
+            from yaku.core.profiles import resolve_profile
+            
+            config, config_path = resolve_profile(self.profile or "default")
+            deps_status = check_audio_dependencies()
+            model_status = None
+            if deps_status.ok:
+                model_status = check_model_available(config)
+                
+            if not deps_status.ok or (model_status and not model_status.ok) or config.audio.device_id is None:
+                from yaku.ui.audio_setup_dialog import AudioSetupDialog
+                dialog = AudioSetupDialog(config, config_path, self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
             
         from yaku.core.profiles import resolve_profile
         config, _ = resolve_profile(self.profile or "default")
@@ -529,6 +705,37 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(btn_close)
         layout.addLayout(btn_layout)
 
+        dialog.exec()
+
+    def _select_yomitan_region(self) -> None:
+        from yaku.core.profiles import resolve_profile
+        config, config_path = resolve_profile(self.profile or "default")
+        
+        self.hide()
+        QTimer.singleShot(200, lambda: self._do_select_yomitan_region(config, config_path))
+
+    def _do_select_yomitan_region(self, config, config_path) -> None:
+        from yaku.core.config import save_config
+        from yaku.ui.region_selector import RegionSelector
+        
+        try:
+            rect = RegionSelector().run_blocking()
+            if rect is not None:
+                config.v4_yomitan.region.x = rect.x
+                config.v4_yomitan.region.y = rect.y
+                config.v4_yomitan.region.w = rect.w
+                config.v4_yomitan.region.h = rect.h
+                config.v4_yomitan.region.is_set = True
+                save_config(config, config_path)
+        finally:
+            self.show()
+
+    def _open_yomitan_dicts(self) -> None:
+        from yaku.core.profiles import resolve_profile
+        from yaku.ui.dictionary_manager_dialog import DictionaryManagerDialog
+        
+        config, _ = resolve_profile(self.profile or "default")
+        dialog = DictionaryManagerDialog(config, self)
         dialog.exec()
 
     def closeEvent(self, event) -> None:  # noqa: N802

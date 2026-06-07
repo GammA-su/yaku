@@ -1,8 +1,34 @@
 app:
   debug: true
-  mode: v2-mirror
+  mode: v1-yomitan
   target_lang: en
   tick_ms: 300
+audio:
+  auto_install_prompt: true
+  backend: kotoba_whisper
+  chunk_seconds: 7.0
+  compute_type: auto
+  dedupe_window: 5
+  device: cuda
+  device_id: 30
+  device_name: Voicemeeter Out B1 (VB-Audio Voicemeeter VAIO)
+  download_models: true
+  enabled: true
+  install_state: auto
+  language: ja
+  local_model_path: null
+  merge_speech_gap_ms: 900
+  min_silence_ms: 450
+  min_speech_ms: 350
+  min_transcript_chars: 2
+  model: kotoba-tech/kotoba-whisper-v2.0-faster
+  model_cache_dir: models/asr
+  optional_dependencies_group: audio
+  sample_rate: 16000
+  source: auto
+  vad_enabled: true
+  vad_tail_ms: 350
+  vad_threshold: 0.3
 cache:
   cache_edited_frames: true
   cache_translations: true
@@ -28,10 +54,10 @@ ocr:
   hash_threshold: 0
   min_chars: 1
   region:
-    h: 147
-    w: 687
-    x: 326
-    y: 644
+    h: 380
+    w: 1976
+    x: 1012
+    y: 1677
 translator:
   backend: llama_cpp
   context_lines: 3
@@ -67,13 +93,49 @@ v1_overlay:
   w: 900
   x: 100
   y: 700
+v1_overlay_max:
+  cache:
+    enabled: true
+  enabled: true
+  force_paddleocr_warning: true
+  hash_threshold: 6
+  japanese_only: true
+  max_regions: 30
+  merge_distance_px: 16
+  merge_nearby_boxes: true
+  min_text_chars: 1
+  overlay:
+    anchor: right
+    avoid_offscreen: true
+    background:
+    - 0
+    - 0
+    - 0
+    font_family: Arial
+    font_size: 13
+    foreground:
+    - 255
+    - 255
+    - 255
+    max_width: 260
+    opacity: 0.82
+    padding: 6
+    show_source_in_debug: true
+  require_ocr_boxes: true
+  scan_interval_ms: 1500
+  scan_scope: window
+  translate_individual_regions: true
 v2_mirror:
   ai_text_edit:
+    allow_resize_output: true
     backend: external_http
+    debug_dir: out/debug/ai_text_edit
     deterministic_text_after_ai: true
     enabled: false
     endpoint: http://127.0.0.1:7860
     fallback: inpaint-text
+    save_debug_payloads: false
+    send_style_hint: true
     timeout_sec: 30
   forward_input: true
   fullscreen: false
@@ -115,7 +177,47 @@ v2_mirror:
     w_ratio: 0.76
     x_ratio: 0.12
     y_ratio: 0.76
+v4_yomitan:
+  debug:
+    debug_dir: out/debug/v4_yomitan
+    save_ocr_region: false
+  dictionaries:
+    auto_import_on_start: true
+    dictionary_dir: dictionaries
+    enabled: true
+    imported_manifest_path: out/yomitan_imported.json
+    index_path: out/yomitan_index.sqlite3
+    max_glossary_items: 6
+  enabled: true
+  hash_threshold: 6
+  hover_trigger: none
+  japanese_only: true
+  lookup_on_click: true
+  lookup_on_hover: true
+  max_hover_results: 8
+  ocr_backend_required: paddleocr
+  popup:
+    font_family: Arial
+    font_size: 14
+    max_height: 420
+    max_width: 520
+    opacity: 0.95
+    show_dictionary_name: true
+    show_frequency: true
+    show_pitch: true
+    show_reading: true
+    show_source_sentence: true
+    show_tags: true
+  region:
+    h: 330
+    is_set: true
+    w: 1860
+    x: 1108
+    y: 1742
+  scan_interval_ms: 1000
+  scan_scope: region
+  tokenizer: simple
 window:
   capture_backend: mss
-  hwnd: 724194
-  title_contains: IsekaiBrideHunting
+  hwnd: 1839978
+  title_contains: アマカノ～PerfectEdition～

@@ -15,15 +15,20 @@ from __future__ import annotations
 import io
 import json
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from PIL import Image
 
-from yaku.core.config import AITextEditConfig
-from yaku.core.errors import AITextEditError
+if TYPE_CHECKING:
+    from yaku.core.config import AITextEditConfig
+
 from yaku.core.logging import get_logger
 
 _log = get_logger("ai_text_edit")
+
+
+class AITextEditError(Exception):
+    """AI text-editing backend failure or unavailability."""
 
 
 def _to_png_bytes(image: Image.Image) -> bytes:
@@ -113,6 +118,8 @@ class ExternalHTTPAITextEditor(BaseAITextEditor):
         self,
         endpoint: str,
         timeout_sec: float = 30.0,
+        send_style_hint: bool = True,
+        allow_resize_output: bool = True,
         *,
         _transport=None,
     ) -> None:
@@ -125,6 +132,8 @@ class ExternalHTTPAITextEditor(BaseAITextEditor):
 
         self._httpx = httpx
         self._endpoint = endpoint
+        self._send_style_hint = send_style_hint
+        self._allow_resize_output = allow_resize_output
         self._client = httpx.Client(timeout=timeout_sec, transport=_transport)
 
     def edit(
@@ -140,13 +149,20 @@ class ExternalHTTPAITextEditor(BaseAITextEditor):
         }
         data = {
             "target_text": target_text,
-            "style_hint": json.dumps(style_hint or {}),
         }
+        if self._send_style_hint and style_hint is not None:
+            data["style_hint"] = json.dumps(style_hint)
 
         try:
             resp = self._client.post(self._endpoint, files=files, data=data)
             resp.raise_for_status()
-        except self._httpx.HTTPError as exc:
+        except self._httpx.TimeoutException as exc:
+            raise AITextEditError(f"AI edit request timed out: {exc}") from exc
+        except self._httpx.HTTPStatusError as exc:
+            raise AITextEditError(f"AI edit server returned non-200 status: {exc}") from exc
+        except self._httpx.RequestError as exc:
+            raise AITextEditError(f"AI edit network request failed: {exc}") from exc
+        except Exception as exc:
             raise AITextEditError(f"AI edit request failed: {exc}") from exc
 
         content = resp.content
@@ -162,10 +178,14 @@ class ExternalHTTPAITextEditor(BaseAITextEditor):
                 f"AI edit server returned a non-image response (content-type={ctype})"
             ) from exc
 
-        edited = edited.convert("RGB")
+        edited = edited.convert(image.mode)
         if edited.size != image.size:
-            # Preserve full frame size regardless of what the server returned.
-            edited = edited.resize(image.size)
+            if self._allow_resize_output:
+                edited = edited.resize(image.size)
+            else:
+                raise AITextEditError(
+                    f"AI edit server returned invalid image size {edited.size} (expected {image.size})"
+                )
         return edited
 
     def close(self) -> None:
@@ -187,7 +207,12 @@ def create_ai_text_editor(config: AITextEditConfig) -> BaseAITextEditor:
         return DisabledAITextEditor("AI text editing is disabled in config")
 
     if config.backend == "external_http":
-        return ExternalHTTPAITextEditor(config.endpoint, float(config.timeout_sec))
+        return ExternalHTTPAITextEditor(
+            endpoint=config.endpoint,
+            timeout_sec=float(config.timeout_sec),
+            send_style_hint=config.send_style_hint,
+            allow_resize_output=config.allow_resize_output,
+        )
 
     _log.warning("Unknown ai_text_edit backend %r; treating as disabled.", config.backend)
     return DisabledAITextEditor(f"Unknown AI backend '{config.backend}'")

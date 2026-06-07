@@ -11,19 +11,18 @@ elsewhere.
 
 ---
 
-## V1 vs V2
+## Modes Comparison
 
-| | `v1-overlay` | `v2-mirror` |
-|---|---|---|
-| **What it does** | Floating, draggable translation box on top of the game | A separate window that mirrors the game frame with text rendered *into* it |
-| **Original text** | Left visible underneath | Covered / inpainted and replaced |
-| **Input** | You play the real game directly | Clicks/keys in the mirror are forwarded to the game (Windows) |
-| **Best for** | Quick setup, any game, lowest overhead | A cleaner "translated game" look, streaming |
-| **Render modes** | n/a | `mask-text`, `inpaint-text`, `ai-text-edit` (experimental) |
-| **Maturity** | Stable | Stable for `mask-text`/`inpaint-text` |
+| | `v1-overlay` | `v1-overlay-max` | `v2-mirror` | `v3-audio-overlay` | `v4-yomitan` |
+|---|---|---|---|---|---|
+| **What it does** | Floating translation box over the game window | Draws mini-labels next to every detected Japanese text region | Separate mirrored game window with in-place text replacement | Captures game audio, transcribes with ASR, and displays translation in a floating overlay | Native Yomitan-style Japanese-English dictionary lookup on hover |
+| **Input Source** | Screen capture (OCR) | Screen capture (OCR) | Screen capture (OCR) | Audio capture (ASR - Kotoba Whisper) | Screen capture (OCR of region) |
+| **Original text** | Left visible underneath | Left visible (labels drawn next to it) | Covered / inpainted and replaced | Hidden (listens to game audio/system voices) | Left visible (dictionary popup overlay displayed on hover) |
+| **Best for** | Text OCR, quick setup, any game | Settings menus, buttons, options, choice screens | Dialogue replacement, visual integration | Audio/Voice translation, hands-free listening | Vocabulary lookup, dictionary integration, learning Japanese |
+| **Render modes** | n/a | n/a | `mask-text`, `inpaint-text`, `ai-text-edit` (experimental) | n/a (uses V1 overlay display) | n/a (uses native Qt popup) |
+| **Maturity** | Stable | Stable | Stable | Stable | Stable |
 
-**Recommendation:** start with `v1-overlay`. Move to `v2-mirror` with
-`mask-text` or `inpaint-text` when you want the text rendered into the frame.
+**Recommendation:** start with `v1-overlay`. Move to `v2-mirror` when you want the text rendered into the frame, use `v1-overlay-max` to translate menus/buttons/choices, use `v3-audio-overlay` if the game has spoken dialogue and you prefer audio transcription, or use `v4-yomitan` to hover over words and look them up in imported dictionaries.
 
 ---
 
@@ -111,18 +110,139 @@ profile under `translator.llama_cpp.base_url`.
 | `inpaint-text` | Erase the original text via OpenCV inpaint, then render exact English on the cleaned background. |
 | `ai-text-edit` | **Experimental.** Use a local AI editor (e.g. AnyText2 / SD-inpainting server) to clean/style the region. |
 
-### AI text editing is experimental
+### Experimental AI Text Edit Mode
 
-> **Warning:** `ai-text-edit` is experimental and **off by default**.
->
-> - It requires a separate local AI server; no AI package ships with Yaku.
-> - AI-generated text **may misspell or distort English**.
-> - It is never trusted by default: with `deterministic_text_after_ai: true` the
->   exact English is re-rendered by code after the AI pass.
-> - If the backend is disabled, missing, or fails, Yaku automatically falls back
->   to the configured `fallback` mode and keeps running.
->
-> **Recommended default is `inpaint-text` or `mask-text`.**
+`ai-text-edit` mode sends the dialogue crop and mask to an external HTTP server.
+
+- **Recommended external model:** AnyText2 for high-quality visual text editing.
+- **Alternative:** FLUX-Text / ComfyUI workflow.
+- **Experimental nature:** AI visual text generation is experimental and can misspell or distort text.
+- **Spelling guarantee:** For exact, correct translations, keep `deterministic_text_after_ai: true` (default). This re-renders the exact translated English text on top of the AI edited background.
+- **Default fallback:** The default remains `inpaint-text` (or `mask-text`), and Yaku will gracefully fall back to it without crashing if the external HTTP backend fails or is unreachable.
+
+#### Example Config
+
+```yaml
+v2_mirror:
+  render_mode: ai-text-edit
+  ai_text_edit:
+    enabled: true
+    backend: external_http
+    endpoint: "http://127.0.0.1:7861/edit"
+    deterministic_text_after_ai: true
+    fallback: inpaint-text
+```
+
+---
+
+## Audio Overlay Mode (v3-audio-overlay)
+
+Audio Overlay Mode captures Japanese game/system audio or microphone voice feeds, transcribes it with a Kotoba Whisper ASR model, translates the transcript using Yaku's normal DeepL or llama.cpp backends, and displays the translation using the existing V1 floating overlay window.
+
+### Setup and Dependencies
+
+Audio Overlay is optional and depends on heavy packages. The first time you select it from the GUI, Yaku will show a setup assistant asking to install the **Audio Pack**.
+
+The Audio Pack installs:
+- `sounddevice` for audio capture
+- `numpy` for data processing
+- `faster-whisper` for ASR execution
+- `silero-vad` for Voice Activity Detection
+- `torch` & `torchaudio` for ML backends
+- `huggingface-hub` for model downloads
+
+By default, Yaku downloads the **Kotoba Whisper** model (`kotoba-tech/kotoba-whisper-v2.0` - approx. 75MB) and caches it locally under `models/asr`.
+
+### Audio Devices
+
+The user can choose microphone (`mic`), system/game audio (`loopback`), or let Yaku auto-select the best device (`auto`). A default device is chosen automatically on first run, but choosing a WASAPI loopback/system-audio device manually is highly recommended for translating direct Visual Novel game audio.
+
+### Commands for Development and Checking
+
+Install the optional group in your virtual environment:
+```powershell
+uv sync --extra audio
+```
+
+Run audio overlay directly:
+```powershell
+uv run yaku --mode v3-audio-overlay --translator llama-cpp --target-lang en --run
+```
+
+Check your audio configuration, model cache, and available system audio devices:
+```powershell
+uv run yaku --check-audio
+```
+
+Or install the Audio Pack from the CLI:
+```powershell
+uv run yaku --install-audio-pack
+```
+
+Or pre-download the Kotoba Whisper model files:
+```powershell
+uv run yaku --download-asr-model
+```
+
+---
+
+## V1 Overlay Max
+
+"V1 Overlay Max" is designed for full-window UI translations. It scans the entire selected VN window, detects all visible Japanese text regions, translates them using your active translation backend, and renders small translated overlay labels next to each detected region.
+
+### Features
+- **Scans Entire Window:** Useful for settings menus, option screens, choice menus, inventories, status screens, and other complex UIs where standard dialogue box OCR is not enough.
+- **Requires PaddleOCR:** Bounding boxes are needed to locate regions, so PaddleOCR is required.
+- **Timing and Interval:** Because full-window OCR takes more time than scanning a small dialogue rectangle, the recommended scan interval is 1-2 seconds (`scan_interval_ms: 1500`).
+- **Translation Caching:** Integrates with Yaku's SQLite translation cache to prevent repeated translations and translation spam of static UI text.
+
+### Commands for Development and Checking
+Run v1-overlay-max directly using llama.cpp or DeepL:
+```bash
+uv run yaku --mode v1-overlay-max --translator llama-cpp --target-lang en --run
+uv run yaku --mode v1-overlay-max --translator deepl --target-lang EN-US --run
+```
+
+---
+
+## Yomitan Native Dictionary Mode (v4-yomitan)
+
+"Yomitan Native Dictionary" mode implements offline Japanese dictionary lookups directly inside Yaku, styled like Yomitan/Rikaichan. When active, Yaku tracks your mouse cursor position over the selected visual novel region, parses Japanese text deinflections recursively, looks them up in imported Yomitan dictionary ZIP files, and displays a native translucent definition popup next to your cursor.
+
+No external browser extensions or clipboard bridges are required.
+
+### Features
+- **Mouse Cursor Tracking:** Hovering over Japanese characters automatically performs lookups. Hover coordinates are mapped using character bounding box approximations relative to the OCR line.
+- **Translucent Popup Overlay:** Styled with CSS to show terms, readings, parts of speech, tags, dictionary titles, pitch accents, and frequency ranks. Click-through flags ensure the popup never blocks mouse clicks or window focus for the Visual Novel.
+- **Recursive Japanese Deinflector:** BFS-based deinflection resolves verbs, adjectives, potentials, causatives, passives, and polite endings back to base/dictionary forms.
+- **SQLite Indexing & Cascading Deletes:** Batch imports Yomitan ZIP archives into an optimized SQLite database. Cascade deletes cleanly wipe associated terms and metadata when a dictionary is deleted.
+
+### Commands for Development and Checking
+
+Run Yomitan mode directly:
+```bash
+uv run yaku --mode v4-yomitan --run
+```
+
+Draw the Yomitan scan region:
+```bash
+uv run yaku --select-yomitan-region
+```
+
+Import Yomitan dictionary ZIP files (reads all ZIP files from your configured dictionary folder, default: `dictionaries/`):
+```bash
+uv run yaku --import-yomitan-dictionaries
+```
+
+Override the dictionary import folder on import or rebuild:
+```bash
+uv run yaku --import-yomitan-dictionaries --dictionary-dir custom_dictionaries/
+```
+
+Rebuild the index (deletes the SQLite file, recreates schemas, and re-imports all dictionary ZIP archives):
+```bash
+uv run yaku --rebuild-yomitan-index
+```
 
 ---
 
@@ -176,10 +296,11 @@ on a hard failure.
 ```
 --profile NAME              use/create profiles/<NAME>.yaml
 --config PATH               use a specific config file (default: configs/default.yaml)
---mode                      v1-overlay | v2-mirror
+--mode                      v1-overlay | v2-mirror | v3-audio-overlay | v1-overlay-max | v4-yomitan
 --translator                deepl | llama-cpp
 --target-lang               ISO language code (e.g. en, de)
 --render-mode               mask-text | inpaint-text | ai-text-edit   (v2 only)
+--dictionary-dir PATH       override Yomitan dictionary import directory
 --debug                     verbose logging
 
 # actions (mutually exclusive)
@@ -189,6 +310,12 @@ on a hard failure.
 --pick-window               pick the target VN window
 --select-ocr-region         draw the OCR capture region
 --select-replacement-region draw the v2 text replacement region
+--check-audio               check audio dependencies, model availability, and devices
+--install-audio-pack         install Audio Pack dependencies
+--download-asr-model        pre-download Kotoba Whisper model files
+--select-yomitan-region     draw the Yomitan scan region
+--import-yomitan-dictionaries import Yomitan dictionary ZIP files
+--rebuild-yomitan-index     rebuild Yomitan SQLite index and re-import ZIPs
 ```
 
 ### Hotkeys

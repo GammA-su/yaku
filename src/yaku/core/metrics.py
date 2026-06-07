@@ -34,6 +34,15 @@ class PipelineMetrics:
     translated_chars: int = 0
     errors_count: int = 0
 
+    # v1-overlay-max specific
+    full_capture_ms: float = 0.0
+    full_ocr_ms: float = 0.0
+    box_count_raw: int = 0
+    box_count_filtered: int = 0
+    translated_box_count: int = 0
+    cache_hit_count: int = 0
+    total_scan_ms: float = 0.0
+
     @property
     def total_ms(self) -> float:
         return sum(getattr(self, name) for name in _MS_FIELDS)
@@ -168,6 +177,15 @@ class LatencyEvent:
     completion_tokens: int | None
     tokens_per_second: float | None
     error: str | None
+
+    # v1-overlay-max specific
+    full_capture_ms: float | None = None
+    full_ocr_ms: float | None = None
+    box_count_raw: int | None = None
+    box_count_filtered: int | None = None
+    translated_box_count: int | None = None
+    cache_hit_count: int | None = None
+    total_scan_ms: float | None = None
 
 
 class MetricsLogger:

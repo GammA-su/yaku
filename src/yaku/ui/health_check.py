@@ -186,6 +186,175 @@ def check_out_dir_writable(_config: YakuConfig | None = None) -> CheckResult:
     return CheckResult("Output dir", FAIL, "out/ is not writable.")
 
 
+def check_audio_dependencies(config: YakuConfig) -> CheckResult:
+    name = "Audio dependencies"
+    if config.app.mode != "v3-audio-overlay":
+        return CheckResult(name, PASS, "Not required by active mode.")
+
+    missing = []
+    for pkg, name_import in [
+        ("sounddevice", "sounddevice"),
+        ("silero-vad", "silero_vad"),
+        ("faster-whisper", "faster_whisper"),
+        ("torch", "torch"),
+        ("torchaudio", "torchaudio"),
+    ]:
+        if not _module_available(name_import):
+            missing.append(pkg)
+
+    if not missing:
+        return CheckResult(name, PASS, "All audio packages are available.")
+    return CheckResult(
+        name,
+        WARN,
+        f"Missing audio packages: {', '.join(missing)}. "
+        "Install via: pip install sounddevice silero-vad faster-whisper torch torchaudio"
+    )
+
+
+def check_cuda_availability(config: YakuConfig) -> CheckResult:
+    name = "CUDA acceleration"
+    if config.app.mode != "v3-audio-overlay":
+        return CheckResult(name, PASS, "Not required by active mode.")
+
+    if not _module_available("torch"):
+        return CheckResult(name, WARN, "torch package is missing; cannot check CUDA.")
+
+    import torch
+    if torch.cuda.is_available():
+        return CheckResult(name, PASS, f"CUDA is available (Device: {torch.cuda.get_device_name(0)}).")
+    
+    device = config.audio.device
+    if device == "cuda":
+        return CheckResult(name, FAIL, "CUDA requested in config but not available in PyTorch.")
+    return CheckResult(name, PASS, "CUDA not available, running on CPU (CPU mode).")
+
+
+def check_audio_devices_available(config: YakuConfig) -> CheckResult:
+    name = "Audio input devices"
+    if config.app.mode != "v3-audio-overlay":
+        return CheckResult(name, PASS, "Not required by active mode.")
+
+    if not _module_available("sounddevice"):
+        return CheckResult(name, WARN, "sounddevice package missing; cannot query devices.")
+
+    try:
+        from yaku.audio.capture import list_audio_devices
+        devices = list_audio_devices()
+        if not devices:
+            return CheckResult(name, FAIL, "No audio input/loopback devices detected on the system.")
+        return CheckResult(name, PASS, f"Detected {len(devices)} input/loopback device(s).")
+    except Exception as exc:
+        return CheckResult(name, FAIL, f"Failed to list audio devices: {exc}")
+
+
+def check_autotranslator_isolation(config: YakuConfig) -> CheckResult:
+    name = "AutoTranslator isolation"
+    import sys
+    for path in sys.path:
+        if "AutoTranslator" in path:
+            return CheckResult(name, WARN, f"AutoTranslator path '{path}' detected in sys.path. Ensure clean separation.")
+    return CheckResult(name, PASS, "Isolated from C:\\Projecyt\\AutoTranslator.")
+
+
+def check_paddleocr_available(config: YakuConfig) -> CheckResult:
+    name = "PaddleOCR package"
+    is_max = config.app.mode == "v1-overlay-max"
+    status_if_missing = FAIL if is_max else WARN
+    if _module_available("paddleocr"):
+        return CheckResult(name, PASS, "paddleocr is installed and importable.")
+    else:
+        return CheckResult(
+            name,
+            status_if_missing,
+            "paddleocr is not installed. Install with: uv add paddleocr paddlepaddle"
+        )
+
+
+def check_ocr_backend_supports_boxes(config: YakuConfig) -> CheckResult:
+    name = "OCR bounding boxes"
+    is_max = config.app.mode == "v1-overlay-max"
+    backend = config.ocr.backend
+    if backend == "paddleocr":
+        return CheckResult(name, PASS, "PaddleOCR backend supports bounding boxes.")
+    elif backend == "dummy":
+        return CheckResult(name, PASS, "DummyOCR supports bounding boxes (testing only).")
+    else:
+        status = FAIL if is_max else PASS
+        return CheckResult(
+            name,
+            status,
+            f"OCR backend '{backend}' does not support bounding boxes. PaddleOCR is required for v1-overlay-max."
+        )
+
+
+def check_window_capture_works(config: YakuConfig) -> CheckResult:
+    name = "VN window capture"
+    try:
+        from yaku.core.capture import _window_rect, create_capture
+        rect = _window_rect(config.window)
+        if rect is None:
+            if config.window.hwnd or config.window.title_contains:
+                return CheckResult(
+                    name,
+                    FAIL,
+                    f"Selected window (HWND: {config.window.hwnd}, title: '{config.window.title_contains}') is not found or not visible."
+                )
+            else:
+                return CheckResult(
+                    name,
+                    WARN,
+                    "No target window selected in config. Using fallback/monitor capture."
+                )
+        
+        cap = create_capture(config.window)
+        try:
+            img = cap.capture_frame()
+            if img:
+                return CheckResult(
+                    name,
+                    PASS,
+                    f"Target window found at {rect} and captured successfully ({img.width}x{img.height})."
+                )
+            else:
+                return CheckResult(name, FAIL, "Captured frame is empty.")
+        finally:
+            cap.close()
+    except Exception as exc:
+        return CheckResult(name, FAIL, f"Window capture check failed: {exc}")
+
+
+def check_yomitan_region(config: YakuConfig) -> CheckResult:
+    name = "Yomitan Region"
+    region = config.v4_yomitan.region
+    if not region.is_set or region.w <= 0 or region.h <= 0:
+        return CheckResult(name, FAIL, "Yomitan region is not set or has invalid size. Draw the region first.")
+    return CheckResult(name, PASS, f"Yomitan region is set: {region.x},{region.y} {region.w}x{region.h}")
+
+
+def check_yomitan_dictionaries(config: YakuConfig) -> CheckResult:
+    name = "Yomitan Dictionaries"
+    db_path = Path(config.v4_yomitan.dictionaries.index_path)
+    if not db_path.exists():
+        return CheckResult(name, WARN, f"SQLite index database does not exist at {db_path}. Run --import-yomitan-dictionaries first.")
+        
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM dictionaries;")
+        dict_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM terms;")
+        term_count = cursor.fetchone()[0]
+        conn.close()
+        
+        if dict_count == 0:
+            return CheckResult(name, WARN, "No dictionaries imported in the SQLite database index.")
+        return CheckResult(name, PASS, f"Database index has {dict_count} dictionary/dictionaries ({term_count:,} terms).")
+    except Exception as exc:
+        return CheckResult(name, FAIL, f"Failed to query dictionary database: {exc}")
+
+
 # ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
@@ -204,10 +373,31 @@ def run_health_checks(
         results.append(check_llama_cpp(config))
 
     results.append(check_ocr(config))
+    results.append(check_paddleocr_available(config))
+    results.append(check_ocr_backend_supports_boxes(config))
+    results.append(check_window_capture_works(config))
     results.append(check_capture(config))
     results.append(check_input_forward(config))
+    results.append(check_audio_dependencies(config))
+    results.append(check_cuda_availability(config))
+    results.append(check_audio_devices_available(config))
+    results.append(check_autotranslator_isolation(config))
     results.append(check_cache_writable(config))
     results.append(check_out_dir_writable(config))
+
+    if config.app.mode in {"v4-yomitan", "v1-yomitan"}:
+        if config.app.mode == "v1-yomitan":
+            name = "OCR Region (for V1+Yomitan)"
+            region = config.ocr.region
+            if region.w <= 0 or region.h <= 0:
+                results.append(CheckResult(name, FAIL, "OCR region is not set or is empty. Draw the region first."))
+            else:
+                results.append(CheckResult(name, PASS, f"OCR region is set: {region.x},{region.y} {region.w}x{region.h}"))
+        else:
+            results.append(check_yomitan_region(config))
+            
+        results.append(check_yomitan_dictionaries(config))
+
     return results
 
 

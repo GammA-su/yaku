@@ -20,6 +20,12 @@ class _Args:
         self.target_lang = kwargs.get("target_lang", None)
         self.render_mode = kwargs.get("render_mode", None)
         self.debug = kwargs.get("debug", False)
+        self.vad_threshold = kwargs.get("vad_threshold", None)
+        self.min_speech_ms = kwargs.get("min_speech_ms", None)
+        self.min_silence_ms = kwargs.get("min_silence_ms", None)
+        self.merge_speech_gap_ms = kwargs.get("merge_speech_gap_ms", None)
+        self.vad_tail_ms = kwargs.get("vad_tail_ms", None)
+        self.max_segment_sec = kwargs.get("max_segment_sec", None)
 
 
 def test_load_default_config():
@@ -83,3 +89,24 @@ def test_invalid_translator_raises_useful_error():
 def test_missing_config_file_raises():
     with pytest.raises(ConfigError):
         load_config(Path("nonexistent_dir/missing.yaml"))
+
+
+def test_cli_override_vad_params():
+    config = load_config(CONFIG_PATH)
+    apply_cli_overrides(
+        config,
+        _Args(
+            vad_threshold=0.35,
+            min_speech_ms=400,
+            min_silence_ms=500,
+            merge_speech_gap_ms=1000,
+            vad_tail_ms=400,
+            max_segment_sec=8.5,
+        ),
+    )
+    assert config.audio.vad_threshold == 0.35
+    assert config.audio.min_speech_ms == 400
+    assert config.audio.min_silence_ms == 500
+    assert config.audio.merge_speech_gap_ms == 1000
+    assert config.audio.vad_tail_ms == 400
+    assert config.audio.chunk_seconds == 8.5

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 class AppConfig(BaseModel):
-    mode: Literal["v1-overlay", "v2-mirror"] = "v1-overlay"
+    mode: Literal["v1-overlay", "v2-mirror", "v3-audio-overlay", "v1-overlay-max", "v4-yomitan", "v1-yomitan"] = "v1-overlay"
     target_lang: str = "en"
     tick_ms: int = 300
     debug: bool = False
@@ -141,10 +141,14 @@ class InpaintConfig(BaseModel):
 class AITextEditConfig(BaseModel):
     enabled: bool = False
     backend: str = "external_http"
-    endpoint: str = "http://127.0.0.1:7860"
+    endpoint: str = "http://127.0.0.1:7861/edit"
     timeout_sec: int = 30
     fallback: Literal["inpaint-text", "mask-text"] = "inpaint-text"
     deterministic_text_after_ai: bool = True
+    send_style_hint: bool = True
+    save_debug_payloads: bool = False
+    debug_dir: str = "out/debug/ai_text_edit"
+    allow_resize_output: bool = True
 
 
 class V2MirrorConfig(BaseModel):
@@ -162,6 +166,93 @@ class V2MirrorConfig(BaseModel):
     ai_text_edit: AITextEditConfig = Field(default_factory=AITextEditConfig)
 
 
+class V1OverlayMaxOverlayConfig(BaseModel):
+    font_family: str = "Arial"
+    font_size: int = 13
+    max_width: int = 260
+    padding: int = 6
+    opacity: float = 0.82
+    background: list[int] = Field(default_factory=lambda: [0, 0, 0])
+    foreground: list[int] = Field(default_factory=lambda: [255, 255, 255])
+    anchor: str = "right"
+    avoid_offscreen: bool = True
+    show_source_in_debug: bool = True
+
+
+class V1OverlayMaxCacheConfig(BaseModel):
+    enabled: bool = True
+
+
+class V1OverlayMaxConfig(BaseModel):
+    enabled: bool = True
+    scan_scope: str = "window"
+    scan_interval_ms: int = 1500
+    hash_threshold: int = 6
+    max_regions: int = 30
+    min_text_chars: int = 1
+    japanese_only: bool = True
+    translate_individual_regions: bool = True
+    merge_nearby_boxes: bool = True
+    merge_distance_px: int = 16
+    require_ocr_boxes: bool = True
+    force_paddleocr_warning: bool = True
+    overlay: V1OverlayMaxOverlayConfig = Field(default_factory=V1OverlayMaxOverlayConfig)
+    cache: V1OverlayMaxCacheConfig = Field(default_factory=V1OverlayMaxCacheConfig)
+
+
+class V4YomitanRegionConfig(BaseModel):
+    x: int = 0
+    y: int = 0
+    w: int = 800
+    h: int = 300
+    is_set: bool = False
+
+
+class V4YomitanDictionariesConfig(BaseModel):
+    enabled: bool = True
+    dictionary_dir: str = "dictionaries"
+    index_path: str = "out/yomitan_index.sqlite3"
+    auto_import_on_start: bool = True
+    imported_manifest_path: str = "out/yomitan_imported.json"
+    max_glossary_items: int = 6
+
+
+class V4YomitanPopupConfig(BaseModel):
+    font_family: str = "Arial"
+    font_size: int = 14
+    max_width: int = 520
+    max_height: int = 420
+    opacity: float = 0.95
+    show_reading: bool = True
+    show_frequency: bool = True
+    show_pitch: bool = True
+    show_tags: bool = True
+    show_source_sentence: bool = True
+    show_dictionary_name: bool = True
+
+
+class V4YomitanDebugConfig(BaseModel):
+    save_ocr_region: bool = False
+    debug_dir: str = "out/debug/v4_yomitan"
+
+
+class V4YomitanConfig(BaseModel):
+    enabled: bool = True
+    region: V4YomitanRegionConfig = Field(default_factory=V4YomitanRegionConfig)
+    scan_scope: str = "region"
+    scan_interval_ms: int = 1000
+    hash_threshold: int = 6
+    ocr_backend_required: str = "paddleocr"
+    japanese_only: bool = True
+    tokenizer: str = "simple"
+    hover_trigger: str = "none"
+    lookup_on_hover: bool = True
+    lookup_on_click: bool = True
+    max_hover_results: int = 8
+    dictionaries: V4YomitanDictionariesConfig = Field(default_factory=V4YomitanDictionariesConfig)
+    popup: V4YomitanPopupConfig = Field(default_factory=V4YomitanPopupConfig)
+    debug: V4YomitanDebugConfig = Field(default_factory=V4YomitanDebugConfig)
+
 
 class MetricsConfig(BaseModel):
     enabled: bool = True
@@ -178,12 +269,43 @@ class CacheConfig(BaseModel):
     cache_edited_frames: bool = True
 
 
+class AudioConfig(BaseModel):
+    enabled: bool = True
+    backend: Literal["kotoba_whisper"] = "kotoba_whisper"
+    source: Literal["auto", "mic", "loopback"] = "auto"
+    device_name: Optional[str] = None
+    device_id: Optional[int] = None
+    sample_rate: int = 16000
+    chunk_seconds: float = 7.0
+    vad_threshold: float = 0.30
+    min_speech_ms: int = 350
+    min_silence_ms: int = 450
+    merge_speech_gap_ms: int = 900
+    vad_tail_ms: int = 350
+    vad_enabled: bool = True
+    min_transcript_chars: int = 2
+    dedupe_window: int = 5
+    language: str = "ja"
+    model: str = "kotoba-tech/kotoba-whisper-v2.0-faster"
+    device: str = "auto"
+    compute_type: str = "auto"
+    local_model_path: Optional[str] = None
+    download_models: bool = True
+    model_cache_dir: str = "models/asr"
+    install_state: Literal["auto", "installed", "missing", "failed"] = "auto"
+    auto_install_prompt: bool = True
+    optional_dependencies_group: str = "audio"
+
+
 class YakuConfig(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
+    audio: AudioConfig = Field(default_factory=AudioConfig)
     window: WindowConfig = Field(default_factory=WindowConfig)
     ocr: OCRConfig = Field(default_factory=OCRConfig)
     translator: TranslatorConfig = Field(default_factory=TranslatorConfig)
     v1_overlay: V1OverlayConfig = Field(default_factory=V1OverlayConfig)
+    v1_overlay_max: V1OverlayMaxConfig = Field(default_factory=V1OverlayMaxConfig)
+    v4_yomitan: V4YomitanConfig = Field(default_factory=V4YomitanConfig)
     v2_mirror: V2MirrorConfig = Field(default_factory=V2MirrorConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     glossary: GlossaryConfig = Field(default_factory=GlossaryConfig)
@@ -218,7 +340,7 @@ def save_config(config: YakuConfig, path: str | Path) -> None:
 # CLI override
 # ---------------------------------------------------------------------------
 
-_VALID_MODES: frozenset[str] = frozenset({"v1-overlay", "v2-mirror"})
+_VALID_MODES: frozenset[str] = frozenset({"v1-overlay", "v2-mirror", "v3-audio-overlay", "v1-overlay-max", "v4-yomitan", "v1-yomitan"})
 _VALID_RENDER_MODES: frozenset[str] = frozenset({"mask-text", "inpaint-text", "ai-text-edit"})
 _TRANSLATOR_CLI_MAP: dict[str, str] = {"llama-cpp": "llama_cpp", "deepl": "deepl"}
 
@@ -255,6 +377,44 @@ def apply_cli_overrides(config: YakuConfig, args: Any) -> None:
                 f"Valid modes: {', '.join(sorted(_VALID_RENDER_MODES))}"
             )
         config.v2_mirror.render_mode = render_mode  # type: ignore[assignment]
+
+    audio_source: str | None = getattr(args, "audio_source", None)
+    if audio_source is not None:
+        if audio_source not in {"auto", "mic", "loopback"}:
+            raise ConfigError(f"Invalid audio source '{audio_source}'. Valid: auto, mic, loopback")
+        config.audio.source = audio_source  # type: ignore[assignment]
+
+    audio_device_name: str | None = getattr(args, "audio_device_name", None)
+    if audio_device_name is not None:
+        config.audio.device_name = audio_device_name
+
+    vad_threshold: float | None = getattr(args, "vad_threshold", None)
+    if vad_threshold is not None:
+        config.audio.vad_threshold = vad_threshold
+
+    min_speech_ms: int | None = getattr(args, "min_speech_ms", None)
+    if min_speech_ms is not None:
+        config.audio.min_speech_ms = min_speech_ms
+
+    min_silence_ms: int | None = getattr(args, "min_silence_ms", None)
+    if min_silence_ms is not None:
+        config.audio.min_silence_ms = min_silence_ms
+
+    merge_speech_gap_ms: int | None = getattr(args, "merge_speech_gap_ms", None)
+    if merge_speech_gap_ms is not None:
+        config.audio.merge_speech_gap_ms = merge_speech_gap_ms
+
+    vad_tail_ms: int | None = getattr(args, "vad_tail_ms", None)
+    if vad_tail_ms is not None:
+        config.audio.vad_tail_ms = vad_tail_ms
+
+    max_segment_sec: float | None = getattr(args, "max_segment_sec", None)
+    if max_segment_sec is not None:
+        config.audio.chunk_seconds = max_segment_sec
+
+    dictionary_dir: str | None = getattr(args, "dictionary_dir", None)
+    if dictionary_dir is not None:
+        config.v4_yomitan.dictionaries.dictionary_dir = dictionary_dir
 
     if getattr(args, "debug", False):
         config.app.debug = True

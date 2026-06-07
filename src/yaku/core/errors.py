@@ -53,8 +53,7 @@ class InpaintError(YakuError):
     """Inpainting backend failure."""
 
 
-class AITextEditError(YakuError):
-    """AI text-editing backend failure or unavailability."""
+from yaku.v2_mirror.ai_text_edit import AITextEditError
 
 
 class RenderError(YakuError):

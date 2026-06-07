@@ -13,6 +13,7 @@ Two render modes are implemented:
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
@@ -63,6 +64,28 @@ class FrameRenderer:
     # Public API
     # ------------------------------------------------------------------
 
+    def _save_debug_payloads(
+        self,
+        image: Image.Image,
+        mask: Image.Image,
+        style_hint: dict,
+        output_image: Optional[Image.Image] = None,
+        debug_dir: str = "out/debug/ai_text_edit",
+    ) -> None:
+        from pathlib import Path
+        path = Path(debug_dir)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            if output_image is None:
+                image.save(path / "last_image.png")
+                mask.save(path / "last_mask.png")
+                with open(path / "last_style_hint.json", "w", encoding="utf-8") as f:
+                    json.dump(style_hint, f, indent=2, ensure_ascii=False)
+            else:
+                output_image.save(path / "last_output.png")
+        except Exception as exc:
+            _log.warning("Failed to save debug payloads: %s", exc)
+
     def render(
         self,
         frame: Image.Image,
@@ -87,54 +110,132 @@ class FrameRenderer:
         if rep_rect.w <= 0 or rep_rect.h <= 0:
             return frame.convert("RGB")
 
-        # Check in-memory display layer cache of cleaned background crop
-        crop = frame.crop((rep_rect.x, rep_rect.y, rep_rect.x + rep_rect.w, rep_rect.y + rep_rect.h))
+        base = frame.convert("RGB")
+        crop = base.crop((rep_rect.x, rep_rect.y, rep_rect.x + rep_rect.w, rep_rect.y + rep_rect.h))
         crop_hash = hashlib.sha1(crop.tobytes()).hexdigest()
 
-        # Cache key includes text ONLY for ai-text-edit (since text is burned in by AI)
-        cache_text = text if mode == "ai-text-edit" else ""
-        cache_key = (crop_hash, cache_text, mode)
-
-        base = frame.convert("RGB")
-
-        if cache_key in self._edited_layer_cache:
-            cleaned_crop = self._edited_layer_cache[cache_key]
-            cleaned = base.copy()
-            cleaned.paste(cleaned_crop, (rep_rect.x, rep_rect.y))
-        else:
-            # Cache miss: prepare background
-            if mode == "mask-text":
-                cleaned = self._prepare_mask_background(base, cfg)
-            elif mode == "inpaint-text":
-                cleaned = self._prepare_inpaint_background(base, rep_rect, cfg)
-                # metadata caching to sqlite DB:
-                mask = build_rect_mask(base.size, rep_rect, cfg.inpaint.mask_padding)
-                self._maybe_cache_edit(base, source_text or "", text, mask, cfg)
-            elif mode == "ai-text-edit":
-                cleaned = self._prepare_ai_background(base, text, source_text or "", rep_rect, cfg)
-            else:
-                raise NotImplementedError(f"render_mode '{mode}' is not implemented yet")
-
-            # Crop the cleaned replacement region and store in cache
-            cleaned_crop = cleaned.crop((rep_rect.x, rep_rect.y, rep_rect.x + rep_rect.w, rep_rect.y + rep_rect.h))
-            if len(self._edited_layer_cache) >= 200:
-                self._edited_layer_cache.pop(next(iter(self._edited_layer_cache)))
-            self._edited_layer_cache[cache_key] = cleaned_crop
-
-        # Determine if we should draw the deterministic text overlay
         if mode == "ai-text-edit":
             ai_cfg = cfg.ai_text_edit
-            if ai_cfg.enabled:
+            if ai_cfg.enabled and not self._ai_editor_failed:
                 editor = self._get_ai_editor(cfg)
-                if editor is not None and not ai_cfg.deterministic_text_after_ai:
-                    # Cleaned background already contains the AI-generated text, no overlay needed
-                    return cleaned
+                if editor is not None:
+                    success_cache_key = (crop_hash, text, "ai-text-edit-success")
+                    if success_cache_key in self._edited_layer_cache:
+                        cleaned_crop = self._edited_layer_cache[success_cache_key]
+                        cleaned = base.copy()
+                        cleaned.paste(cleaned_crop, (rep_rect.x, rep_rect.y))
+                        return cleaned
+
+                    text_rect = self._text_rect(base.width, base.height, cfg)
+                    text_rect_in_crop = Rect(
+                        x=text_rect.x - rep_rect.x,
+                        y=text_rect.y - rep_rect.y,
+                        w=text_rect.w,
+                        h=text_rect.h,
+                    )
+                    mask = build_rect_mask(crop.size, text_rect_in_crop, padding=cfg.inpaint.mask_padding)
+
+                    style_hint = {
+                        "box": [text_rect_in_crop.x, text_rect_in_crop.y, text_rect_in_crop.w, text_rect_in_crop.h],
+                        "target_lang": "en",
+                    }
+                    if cfg.render_text.sample_style_from_source:
+                        if text_rect_in_crop.w > 0 and text_rect_in_crop.h > 0:
+                            original_crop = crop.crop((text_rect_in_crop.x, text_rect_in_crop.y, text_rect_in_crop.x + text_rect_in_crop.w, text_rect_in_crop.y + text_rect_in_crop.h))
+                            try:
+                                style_obj = estimate_text_style(original_crop)
+                                style_hint.update({
+                                    "font_size": style_obj.estimated_font_size,
+                                    "fill_rgb": list(style_obj.fill_rgb) if style_obj.fill_rgb else None,
+                                    "stroke_rgb": list(style_obj.stroke_rgb) if style_obj.stroke_rgb else None,
+                                })
+                            except Exception as exc:
+                                _log.debug("Style extraction failed for AI style_hint: %s", exc)
+
+                    try:
+                        if ai_cfg.save_debug_payloads:
+                            self._save_debug_payloads(crop, mask, style_hint, output_image=None, debug_dir=ai_cfg.debug_dir)
+
+                        edited_crop = editor.edit(crop, mask, text, style_hint=style_hint)
+                        edited_crop = edited_crop.convert(crop.mode)
+
+                        if ai_cfg.save_debug_payloads:
+                            self._save_debug_payloads(crop, mask, style_hint, output_image=edited_crop, debug_dir=ai_cfg.debug_dir)
+
+                        if ai_cfg.deterministic_text_after_ai:
+                            style = None
+                            if cfg.render_text.sample_style_from_source:
+                                if text_rect_in_crop.w > 0 and text_rect_in_crop.h > 0:
+                                    original_crop = crop.crop((text_rect_in_crop.x, text_rect_in_crop.y, text_rect_in_crop.x + text_rect_in_crop.w, text_rect_in_crop.y + text_rect_in_crop.h))
+                                    try:
+                                        style = estimate_text_style(original_crop)
+                                    except Exception as exc:
+                                        _log.debug("Style extraction failed, falling back: %s", exc)
+
+                            if style is None:
+                                style = TextStyle(
+                                    fill_rgb=tuple(cfg.render_text.fallback_fill),
+                                    stroke_rgb=tuple(cfg.render_text.fallback_stroke),
+                                )
+
+                            crop_rep_rect = Rect(0, 0, rep_rect.w, rep_rect.h)
+                            edited_crop = self._draw_translated_text(
+                                edited_crop, crop_rep_rect, text_rect_in_crop, text, cfg, draw_box=False, style=style
+                            )
+
+                        if len(self._edited_layer_cache) >= 200:
+                            self._edited_layer_cache.pop(next(iter(self._edited_layer_cache)))
+                        self._edited_layer_cache[success_cache_key] = edited_crop
+
+                        cleaned = base.copy()
+                        cleaned.paste(edited_crop, (rep_rect.x, rep_rect.y))
+                        return cleaned
+
+                    except Exception as exc:
+                        _log.warning(
+                            "ai-text-edit failed (%s); falling back to %s.", exc, ai_cfg.fallback
+                        )
+
+            fallback_mode = ai_cfg.fallback
+            fallback_cache_key = (crop_hash, "", f"ai-text-edit-fallback-{fallback_mode}")
+            if fallback_cache_key in self._edited_layer_cache:
+                cleaned_crop = self._edited_layer_cache[fallback_cache_key]
+                cleaned = base.copy()
+                cleaned.paste(cleaned_crop, (rep_rect.x, rep_rect.y))
+            else:
+                if fallback_mode == "mask-text":
+                    cleaned = self._prepare_mask_background(base, cfg)
+                else:
+                    cleaned = self._prepare_inpaint_background(base, rep_rect, cfg)
+
+                cleaned_crop = cleaned.crop((rep_rect.x, rep_rect.y, rep_rect.x + rep_rect.w, rep_rect.y + rep_rect.h))
+                if len(self._edited_layer_cache) >= 200:
+                    self._edited_layer_cache.pop(next(iter(self._edited_layer_cache)))
+                self._edited_layer_cache[fallback_cache_key] = cleaned_crop
+        else:
+            cache_key = (crop_hash, "", mode)
+            if cache_key in self._edited_layer_cache:
+                cleaned_crop = self._edited_layer_cache[cache_key]
+                cleaned = base.copy()
+                cleaned.paste(cleaned_crop, (rep_rect.x, rep_rect.y))
+            else:
+                if mode == "mask-text":
+                    cleaned = self._prepare_mask_background(base, cfg)
+                elif mode == "inpaint-text":
+                    cleaned = self._prepare_inpaint_background(base, rep_rect, cfg)
+                    mask = build_rect_mask(base.size, rep_rect, cfg.inpaint.mask_padding)
+                    self._maybe_cache_edit(base, source_text or "", text, mask, cfg)
+                else:
+                    raise NotImplementedError(f"render_mode '{mode}' is not implemented yet")
+
+                cleaned_crop = cleaned.crop((rep_rect.x, rep_rect.y, rep_rect.x + rep_rect.w, rep_rect.y + rep_rect.h))
+                if len(self._edited_layer_cache) >= 200:
+                    self._edited_layer_cache.pop(next(iter(self._edited_layer_cache)))
+                self._edited_layer_cache[cache_key] = cleaned_crop
 
         text_rect = self._text_rect(base.width, base.height, cfg)
-
-        # Estimate text style if enabled (only relevant for inpaint-text)
         style = None
-        if mode == "inpaint-text" and cfg.render_text.sample_style_from_source and source_text:
+        if mode != "mask-text" and cfg.render_text.sample_style_from_source and source_text:
             crop_rect = text_rect
             if crop_rect.w > 0 and crop_rect.h > 0:
                 original_crop = base.crop((crop_rect.x, crop_rect.y, crop_rect.x + crop_rect.w, crop_rect.y + crop_rect.h))
@@ -304,53 +405,6 @@ class FrameRenderer:
             self._ai_editor_failed = True
             return None
         return self._ai_editor
-
-    def _prepare_ai_background(
-        self, base: Image.Image, text: str, source_text: str, rep_rect: Rect, cfg: V2MirrorConfig
-    ) -> Image.Image:
-        ai_cfg = cfg.ai_text_edit
-        if not ai_cfg.enabled:
-            _log.warning(
-                "ai-text-edit is disabled; falling back to %s.", ai_cfg.fallback
-            )
-            return self._prepare_ai_fallback(base, text, source_text, rep_rect, cfg)
-
-        editor = self._get_ai_editor(cfg)
-        if editor is None:
-            _log.warning(
-                "ai-text-edit backend unavailable; falling back to %s.", ai_cfg.fallback
-            )
-            return self._prepare_ai_fallback(base, text, source_text, rep_rect, cfg)
-
-        mask = build_rect_mask(base.size, rep_rect, cfg.inpaint.mask_padding)
-        try:
-            # Delegate to 'edit' method (or edit_text alias)
-            edited = editor.edit(base, mask, text, style_hint=self._style_hint(rep_rect))
-        except Exception as exc:  # noqa: BLE001 — never crash the display loop
-            _log.warning(
-                "ai-text-edit failed (%s); falling back to %s.", exc, ai_cfg.fallback
-            )
-            return self._prepare_ai_fallback(base, text, source_text, rep_rect, cfg)
-
-        if edited.size != base.size:
-            edited = edited.resize(base.size)
-
-        return edited.convert("RGB")
-
-    def _prepare_ai_fallback(
-        self, base: Image.Image, text: str, source_text: str, rep_rect: Rect, cfg: V2MirrorConfig
-    ) -> Image.Image:
-        """Render via the configured AI fallback mode."""
-        ai_cfg = cfg.ai_text_edit
-        if ai_cfg.fallback == "mask-text":
-            return self._prepare_mask_background(base, cfg)
-        return self._prepare_inpaint_background(base, rep_rect, cfg)
-
-    def _style_hint(self, rect: Rect) -> dict:
-        return {
-            "box": [rect.x, rect.y, rect.w, rect.h],
-            "target_lang": "en",
-        }
 
     # ------------------------------------------------------------------
     # Edit-frame metadata cache
