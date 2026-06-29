@@ -1,6 +1,6 @@
 app:
   debug: true
-  mode: v1-yomitan
+  mode: v4-yomitan
   target_lang: en
   tick_ms: 300
 audio:
@@ -54,12 +54,12 @@ ocr:
   hash_threshold: 0
   min_chars: 1
   region:
-    h: 380
-    w: 1976
-    x: 1012
-    y: 1677
+    h: 268
+    w: 784
+    x: 518
+    y: 836
 translator:
-  backend: llama_cpp
+  backend: deepl
   context_lines: 3
   deepl:
     api_key: 185afb96-99c1-4742-ab05-986525a3e90a:fx
@@ -69,13 +69,13 @@ translator:
     use_context: true
   llama_cpp:
     api_key_env: longapikey
-    base_url: http://127.0.0.1:8080/v1
+    base_url: http://127.0.0.1:8081/v1
     disable_reasoning: true
     max_tokens: 256
     model: qwen-local
     port: 8080
     temperature: 0.2
-    use_hosted: false
+    use_hosted: true
 v1_overlay:
   background_opacity: 0.55
   click_through: true
@@ -148,7 +148,7 @@ v2_mirror:
     radius: 3
   input_focus_mode: send_input_only
   preserve_aspect_ratio: true
-  render_mode: inpaint-text
+  render_mode: ai-text-edit
   render_text:
     auto_fit: true
     fallback_fill:
@@ -219,5 +219,5 @@ v4_yomitan:
   tokenizer: simple
 window:
   capture_backend: mss
-  hwnd: 1839978
-  title_contains: アマカノ～PerfectEdition～
+  hwnd: 592670
+  title_contains: IsekaiBrideHunting
